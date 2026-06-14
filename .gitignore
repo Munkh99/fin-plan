@@ -1,11 +1,15 @@
-# Python
-__pycache__/
-*.py[cod]
-*.pyo
-*.pyd
-.venv/
-venv/
-.env
-
 # macOS
 .DS_Store
+
+# Firebase
+.firebase/
+firebase-debug.log
+firestore-debug.log
+
+# Node (firebase-tools)
+node_modules/
+.npm/
+
+# Env
+.env
+.env.local

@@ -15,6 +15,7 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+  <script src="config.js"></script>
 
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
@@ -150,31 +151,7 @@ if ('serviceWorker' in navigator) {
 }
 
 (function(){
-  // ─── FIREBASE CONFIG ──────────────────────────────────────────────────────
-  // 1. Go to https://console.firebase.google.com
-  // 2. Create a project → Add web app → copy the config below
-  // 3. Enable Authentication → Sign-in method → Google
-  // 4. Create Firestore Database (Start in production mode)
-  // 5. Firestore → Rules → paste:
-  //      rules_version = '2';
-  //      service cloud.firestore {
-  //        match /databases/{database}/documents {
-  //          match /users/{uid} {
-  //            allow read, write: if request.auth != null && request.auth.uid == uid;
-  //          }
-  //        }
-  //      }
-  // 6. Authentication → Settings → Authorized domains → add your GitHub Pages domain
-  const FIREBASE_CONFIG = {
-    apiKey:            "REPLACE_ME",
-    authDomain:        "REPLACE_ME.firebaseapp.com",
-    projectId:         "REPLACE_ME",
-    storageBucket:     "REPLACE_ME.appspot.com",
-    messagingSenderId: "REPLACE_ME",
-    appId:             "REPLACE_ME"
-  };
-  // ─────────────────────────────────────────────────────────────────────────
-
+  // FIREBASE_CONFIG is loaded from config.js
   const configured = FIREBASE_CONFIG.apiKey !== 'REPLACE_ME';
   let auth, db, currentUser = null;
 

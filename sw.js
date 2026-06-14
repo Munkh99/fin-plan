@@ -1,5 +1,5 @@
 const CACHE = 'payoff-v1';
-const CORE = ['./', './index.html', './manifest.json', './icon.svg'];
+const CORE = ['./', './index.html', './config.js', './manifest.json', './icon.svg'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(CORE)));
