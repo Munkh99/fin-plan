@@ -6,6 +6,9 @@
       ".firebaserc",
       "**/.*",
       "**/node_modules/**"
+    ],
+    "redirects": [
+      { "source": "/favicon.ico", "destination": "/icon.svg", "type": 301 }
     ]
   }
 }

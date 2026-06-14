@@ -1,4 +1,4 @@
-const CACHE = 'payoff-v1';
+const CACHE = 'payoff-v3';
 const CORE = ['./', './index.html', './style.css', './app.js', './config.js', './manifest.json', './icon.svg'];
 
 self.addEventListener('install', e => {

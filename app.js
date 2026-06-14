@@ -88,10 +88,11 @@ if ('serviceWorker' in navigator) {
 
   function migrate(s) {
     if (!s) return s;
-    if (s.order && !s.loanOrder) { s.loanOrder = s.order; delete s.order; }
+    if (!s.loanOrder) { s.loanOrder = s.order || []; delete s.order; }
     if (!s.savings) s.savings = {};
     if (!s.savingsOrder) s.savingsOrder = [];
     if (!s.spends) s.spends = [];
+    if (!s.history) s.history = [];
     if (s.budget === undefined) s.budget = s.expenses || 0;
     if (s.onboarded === undefined) s.onboarded = !!(s.loanOrder && s.loanOrder.length > 0);
     const typeMap = { toki: 'revolving', inst: 'fixed' };
