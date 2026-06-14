@@ -62,6 +62,8 @@ function defaults() {
     cursor: 0,
     startAbs: now.getFullYear() * 12 + now.getMonth() - BASE,
     history: [],
+    catBudgets: {},   // { categoryId: monthly limit }
+    recurring: [],    // [{ id, note, amount, category }]
   };
 }
 let S = defaults();
@@ -75,6 +77,8 @@ function migrate(s) {
   if (!s.savingsOrder) s.savingsOrder = [];
   if (!s.spends) s.spends = [];
   if (!s.history) s.history = [];
+  if (!s.catBudgets) s.catBudgets = {};
+  if (!s.recurring) s.recurring = [];
   if (s.budget === undefined) s.budget = s.expenses || 0;
   if (s.onboarded === undefined) s.onboarded = !!(s.loanOrder && s.loanOrder.length > 0);
   const typeMap = { toki: 'revolving', inst: 'fixed' };
@@ -116,6 +120,8 @@ function settingsPayload() {
     loanOrder: S.loanOrder,
     savingsOrder: S.savingsOrder,
     history: S.history,
+    catBudgets: S.catBudgets,
+    recurring: S.recurring,
     schema: SCHEMA,
     updatedAt: serverTimestamp(),
   };
@@ -224,27 +230,6 @@ function resetAll() {
   ops.push((b) => b.set(userDoc(), settingsPayload()));
   trackSync(runChunked(ops));
 }
-function importAll(parsed) {
-  const oldLoan = Object.keys(S.loans);
-  const oldSav = Object.keys(S.savings);
-  const oldSpend = S.spends.map((s) => s.id);
-  S = parsed;
-  persistLocal();
-  if (!canWrite()) return;
-  const newLoan = new Set(Object.keys(parsed.loans || {}));
-  const newSav = new Set(Object.keys(parsed.savings || {}));
-  const newSpend = new Set((parsed.spends || []).map((s) => s.id));
-  const ops = [];
-  oldLoan.filter((id) => !newLoan.has(id)).forEach((id) => ops.push((b) => b.delete(loanDoc(id))));
-  oldSav.filter((id) => !newSav.has(id)).forEach((id) => ops.push((b) => b.delete(savDoc(id))));
-  oldSpend.filter((id) => !newSpend.has(id)).forEach((id) => ops.push((b) => b.delete(spendDoc(id))));
-  for (const id of Object.keys(parsed.loans || {})) ops.push((b) => b.set(loanDoc(id), parsed.loans[id]));
-  for (const id of Object.keys(parsed.savings || {})) ops.push((b) => b.set(savDoc(id), parsed.savings[id]));
-  for (const sp of parsed.spends || []) { const { id: _o, ...d } = sp; ops.push((b) => b.set(spendDoc(sp.id), d)); }
-  ops.push((b) => b.set(userDoc(), settingsPayload()));
-  trackSync(runChunked(ops));
-}
-
 // One-time upgrade: legacy single-blob doc { payload } → per-entity docs.
 async function migrateRemoteIfNeeded() {
   if (!canWrite()) return;
@@ -296,6 +281,8 @@ function attachListeners() {
     S.loanOrder = d.loanOrder || [];
     S.savingsOrder = d.savingsOrder || [];
     S.history = d.history || [];
+    S.catBudgets = d.catBudgets || {};
+    S.recurring = d.recurring || [];
     reconcile();
   }, () => {}));
   unsubs.push(onSnapshot(loansCol(), (snap) => {
@@ -407,6 +394,28 @@ function byCategory(ym) {
   for (const sp of spendsForMonth(ym)) totals[sp.category] = (totals[sp.category] || 0) + sp.amount;
   return totals;
 }
+// Last `n` months (oldest→newest) with their spend totals, for the trend chart.
+function lastMonthsTotals(n) {
+  const arr = [];
+  let ym = nowMonth();
+  for (let i = 0; i < n; i++) { arr.unshift({ ym, total: totalForMonth(ym) }); ym = prevMonth(ym); }
+  return arr;
+}
+
+// ── Date helpers ──────────────────────────────────────────────────────────────
+const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+const dateStrFromTs = (ts) => { const d = new Date(ts); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+let toastTimer;
+function toast(msg) {
+  let el = document.getElementById('toast');
+  if (!el) { el = document.createElement('div'); el.id = 'toast'; el.className = 'toast'; document.body.appendChild(el); }
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2200);
+}
 
 // ── DOM ───────────────────────────────────────────────────────────────────────
 const appEl = document.getElementById('app');
@@ -449,11 +458,27 @@ function renderShell() {
     activeTab = btn.dataset.tab;
     appEl.querySelectorAll('.tab-btn').forEach((b) => b.classList.toggle('active', b.dataset.tab === activeTab));
     renderContent();
+    updateFab();
   }));
-  document.getElementById('fab').onclick = () => openAddSpend();
   renderTopbarRight();
   renderContent();
+  updateFab();
   updateSyncDot();
+}
+
+// The FAB does the most relevant "add" for the current tab.
+function updateFab() {
+  const fab = document.getElementById('fab');
+  if (!fab) return;
+  const map = {
+    overview: { t: 'Add spending', fn: () => openAddSpend() },
+    spending: { t: 'Add spending', fn: () => openAddSpend() },
+    loans:    { t: 'Add loan',     fn: () => openLoanForm(null, renderContent) },
+    savings:  { t: 'Add savings goal', fn: () => openSavingsForm(null, renderContent) },
+  };
+  const m = map[activeTab] || map.overview;
+  fab.title = m.t;
+  fab.onclick = m.fn;
 }
 
 function renderTopbarRight() {
@@ -553,6 +578,18 @@ function renderOverview(el) {
   </div>`;
   h += `</div>`;
 
+  // Net worth (savings − debt)
+  if (S.savingsOrder.length || S.loanOrder.length) {
+    const net = totalSaved - totalDebt;
+    h += `<div class="networth">
+      <div><div class="k">Net worth</div><div class="sub" style="text-align:left;margin-top:2px">Savings ${fmtShort(totalSaved)} − Debt ${fmtShort(totalDebt)}</div></div>
+      <div class="v ${net >= 0 ? 'good' : 'bad'}">${net < 0 ? '−' : ''}${fmtShort(Math.abs(net))}</div>
+    </div>`;
+  }
+
+  // 6-month spending trend
+  if (S.spends.length) h += trendCard();
+
   const plannedTotal = S.loanOrder.reduce((s, id) => s + (plannedLoans(cloneLoans())[id] || 0), 0);
   h += `<div style="background:var(--card);border-radius:14px;padding:14px 16px;box-shadow:var(--shadow);margin-bottom:4px">
     <div style="font-family:'Bricolage Grotesque',sans-serif;font-weight:700;font-size:13px;margin-bottom:10px">Monthly breakdown</div>
@@ -576,6 +613,23 @@ function row(label, amount, color) {
     <span style="font-size:12px;color:var(--soft)">${label}</span>
     <span style="font-size:13px;font-weight:600;font-variant-numeric:tabular-nums;color:${color}">${fmt(amount)}</span>
   </div>`;
+}
+
+function trendCard() {
+  const data = lastMonthsTotals(6);
+  const max = Math.max(...data.map((d) => d.total), 1);
+  const ML = ['J', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D'];
+  const cur = nowMonth();
+  const bars = data.map((d) => {
+    const hpct = Math.round((d.total / max) * 100);
+    const m = parseInt(d.ym.split('-')[1]) - 1;
+    return `<div class="tb${d.ym === cur ? ' cur' : ''}">
+      <div class="tb-v">${d.total ? fmtShort(d.total) : ''}</div>
+      <div class="tb-bar"><span style="height:${hpct}%"></span></div>
+      <div class="tb-l">${ML[m]}</div>
+    </div>`;
+  }).join('');
+  return `<div class="trend-card"><div class="trend-h">6-month spending</div><div class="trend-bars">${bars}</div></div>`;
 }
 
 // ── Spending tab ──────────────────────────────────────────────────────────────
@@ -614,11 +668,17 @@ function renderSpending(el) {
     if (sortedCats.length) {
       h += `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">`;
       for (const c of sortedCats) {
-        h += `<div style="display:flex;align-items:center;gap:5px;background:var(--card);border-radius:20px;padding:5px 10px;font-size:11px;box-shadow:var(--shadow)">
-          <span>${c.icon}</span><span style="font-weight:600">${fmtShort(cats[c.id])}</span>
+        const b = S.catBudgets[c.id];
+        const over = b && cats[c.id] > b;
+        h += `<div style="display:flex;align-items:center;gap:5px;background:var(--card);border-radius:20px;padding:5px 10px;font-size:11px;box-shadow:var(--shadow);${over ? 'color:var(--danger)' : ''}">
+          <span>${c.icon}</span><span style="font-weight:600">${fmtShort(cats[c.id])}${b ? ` / ${fmtShort(b)}` : ''}</span>${over ? ' ⚠' : ''}
         </div>`;
       }
       h += `</div>`;
+    }
+
+    if (items.length >= 6) {
+      h += `<input class="search-input" id="sp_search" placeholder="🔍 Search notes or category…">`;
     }
 
     for (const dayKey of Object.keys(byDay)) {
@@ -630,7 +690,8 @@ function renderSpending(el) {
       for (const sp of byDay[dayKey]) {
         const c = CAT[sp.category] || CAT.other;
         const note = esc(sp.note);
-        h += `<div class="spend-item" data-spend="${esc(sp.id)}">
+        const hay = esc(((sp.note || '') + ' ' + c.label).toLowerCase());
+        h += `<div class="spend-item" data-spend="${esc(sp.id)}" data-search="${hay}">
           <div class="cat-icon" style="background:${c.color}22">${c.icon}</div>
           <div class="info">
             <div class="name">${note || c.label}</div>
@@ -647,6 +708,19 @@ function renderSpending(el) {
   document.getElementById('mn_prev').onclick = () => { spendMonth = prevMonth(spendMonth); renderContent(); };
   document.getElementById('mn_next').onclick = () => { spendMonth = nextMonthStr(spendMonth); renderContent(); };
   el.querySelectorAll('[data-spend]').forEach((item) => (item.onclick = () => openEditSpend(item.dataset.spend)));
+  const search = document.getElementById('sp_search');
+  if (search) search.oninput = () => {
+    const q = search.value.trim().toLowerCase();
+    el.querySelectorAll('[data-spend]').forEach((item) => {
+      const hay = item.getAttribute('data-search') || '';
+      item.style.display = !q || hay.includes(q) ? '' : 'none';
+    });
+    // Hide day headers whose entries are all filtered out.
+    el.querySelectorAll('.day-group').forEach((g) => {
+      const anyVisible = [...g.querySelectorAll('[data-spend]')].some((i) => i.style.display !== 'none');
+      g.style.display = anyVisible ? '' : 'none';
+    });
+  };
 }
 
 // ── Loans tab ───────────────────────────────────────────────────────────────
@@ -753,13 +827,20 @@ function openAddSpend(prefill) {
       <span class="label">${c.label}</span>
     </div>`).join('');
 
+  const recChips = S.recurring.length
+    ? `<div class="rec-chips">${S.recurring.map((r) => `<span class="rec-chip" data-rec="${esc(r.id)}">${(CAT[r.category] || CAT.other).icon} ${esc(r.note || (CAT[r.category] || CAT.other).label)} · ${fmtShort(r.amount)}</span>`).join('')}</div>`
+    : '';
+
   scrim.innerHTML = `<div class="sheet">
     <h2>Add spending</h2>
+    ${recChips}
     <div class="amount-prefix">Amount (₮)</div>
     <input class="amount-input" id="sp_amount" inputmode="numeric" placeholder="0" autocomplete="off" value="${prefill ? prefill.amount : ''}">
     <div class="cat-grid" id="cat_grid">${catGrid()}</div>
     <label class="set-label">Note (optional)</label>
     <input class="set-input" id="sp_note" placeholder="e.g. Lunch, Grocery run…" value="${prefill ? esc(prefill.note || '') : ''}">
+    <label class="set-label">Date</label>
+    <input class="set-input" type="date" id="sp_date" value="${todayStr()}" max="${todayStr()}">
     <div class="btnrow">
       <button class="ghost" id="sp_cancel">Cancel</button>
       <button class="primary" id="sp_save">Add</button>
@@ -768,21 +849,26 @@ function openAddSpend(prefill) {
   scrim.classList.add('open');
   document.getElementById('sp_amount').focus();
   document.getElementById('sp_cancel').onclick = closeSheet;
-  scrim.querySelectorAll('.cat-pick').forEach((btn) => {
-    btn.onclick = () => {
-      selCat = btn.dataset.cat;
-      scrim.querySelectorAll('.cat-pick').forEach((b) => b.classList.toggle('selected', b.dataset.cat === selCat));
-    };
-  });
+  const syncCatUI = () => scrim.querySelectorAll('.cat-pick').forEach((b) => b.classList.toggle('selected', b.dataset.cat === selCat));
+  scrim.querySelectorAll('.cat-pick').forEach((btn) => { btn.onclick = () => { selCat = btn.dataset.cat; syncCatUI(); }; });
+  scrim.querySelectorAll('.rec-chip').forEach((chip) => { chip.onclick = () => {
+    const r = S.recurring.find((x) => x.id === chip.dataset.rec); if (!r) return;
+    document.getElementById('sp_amount').value = r.amount.toLocaleString('en-US');
+    document.getElementById('sp_note').value = r.note || '';
+    selCat = r.category; syncCatUI();
+  }; });
   document.getElementById('sp_save').onclick = () => {
     const amount = parseInt((document.getElementById('sp_amount').value || '').replace(/[^\d]/g, '')) || 0;
     if (!amount) { alert('Enter an amount.'); return; }
     const note = (document.getElementById('sp_note').value || '').trim();
-    const ym = nowMonth();
+    const dateStr = document.getElementById('sp_date').value || todayStr();
+    const ts = dateStr === todayStr() ? Date.now() : new Date(dateStr + 'T12:00:00').getTime();
+    const ym = dateStr.slice(0, 7);
     const id = 'sp_' + Date.now();
     lastCat = selCat;
-    S.spends.push({ id, ts: Date.now(), month: ym, amount, category: selCat, note });
+    S.spends.push({ id, ts, month: ym, amount, category: selCat, note });
     persistSpend(id); closeSheet(); renderContent();
+    toast(`Added ${fmt(amount)} · ${(CAT[selCat] || CAT.other).label}`);
   };
 }
 
@@ -802,6 +888,8 @@ function openEditSpend(id) {
     <div class="cat-grid" id="cat_grid">${catGrid()}</div>
     <label class="set-label">Note (optional)</label>
     <input class="set-input" id="sp_note" value="${esc(sp.note || '')}">
+    <label class="set-label">Date</label>
+    <input class="set-input" type="date" id="sp_date" value="${dateStrFromTs(sp.ts)}" max="${todayStr()}">
     <div class="btnrow">
       <button class="ghost" id="sp_del" style="color:var(--danger)">Delete</button>
       <button class="primary" id="sp_save">Save</button>
@@ -815,14 +903,19 @@ function openEditSpend(id) {
     if (!confirm('Delete this entry?')) return;
     S.spends = S.spends.filter((x) => x.id !== id);
     persistSpendDelete(id); closeSheet(); renderContent();
+    toast('Entry deleted');
   };
   document.getElementById('sp_save').onclick = () => {
     const amount = parseInt((document.getElementById('sp_amount').value || '').replace(/[^\d]/g, '')) || 0;
     if (!amount) { alert('Enter an amount.'); return; }
     const note = (document.getElementById('sp_note').value || '').trim();
+    const dateStr = document.getElementById('sp_date').value || dateStrFromTs(sp.ts);
+    const ts = new Date(dateStr + 'T12:00:00').getTime();
+    const month = dateStr.slice(0, 7);
     const idx = S.spends.findIndex((x) => x.id === id);
-    if (idx >= 0) { S.spends[idx] = { ...S.spends[idx], amount, category: selCat, note }; }
+    if (idx >= 0) { S.spends[idx] = { ...S.spends[idx], amount, category: selCat, note, ts, month }; }
     persistSpend(id); closeSheet(); renderContent();
+    toast('Saved');
   };
 }
 
@@ -1105,6 +1198,10 @@ function openSettings() {
       <input class="set-input mono" id="s_budget" inputmode="numeric" placeholder="0" value="${S.budget ? S.budget.toLocaleString('en-US') : ''}"></div>
   </div>
   <div class="divider"></div>
+  <div style="font-family:'Bricolage Grotesque',sans-serif;font-weight:700;margin-bottom:4px">Category budgets <span style="font-weight:400;font-size:11px;color:var(--soft)">(optional)</span></div>
+  <div style="font-size:11px;color:var(--soft);margin-bottom:10px">Per-category monthly limits. You'll see a ⚠ when you go over.</div>
+  ${CATEGORIES.map((c) => `<div class="catbud-row"><span class="lbl">${c.icon} ${c.label}</span><input class="set-input mono" id="cb_${c.id}" inputmode="numeric" placeholder="—" value="${S.catBudgets[c.id] ? S.catBudgets[c.id].toLocaleString('en-US') : ''}"></div>`).join('')}
+  <div class="divider"></div>
   <div class="row-space" style="margin-bottom:8px">
     <span style="font-family:'Bricolage Grotesque',sans-serif;font-weight:700">Loans (${S.loanOrder.length})</span>
     <button class="ghost" id="sAddLoan" style="flex:0 0 auto;padding:7px 13px;font-size:12px;border-radius:10px">＋ Add</button>
@@ -1119,11 +1216,17 @@ function openSettings() {
   if (!S.savingsOrder.length) h += `<div class="empty" style="padding:10px 0">No savings goals.</div>`;
   for (const id of S.savingsOrder) { const sv = S.savings[id]; if (!sv) continue; h += `<div class="ob-item" style="border-left-color:${sv.color};cursor:pointer;margin-bottom:7px" data-editsav="${esc(id)}"><div style="flex:1"><div style="font-family:'Bricolage Grotesque',sans-serif;font-weight:700;font-size:14px">${esc(sv.name)}</div><div style="font-size:11px;color:var(--soft)">${fmt(sv.current)} / ${fmt(sv.target)}</div></div><span style="color:var(--soft)">›</span></div>`; }
   h += `<div class="divider"></div>
-  <div class="btnrow">
-    <button class="ghost" id="exportBtn">⬇ Export</button>
-    <button class="ghost" id="importBtn">⬆ Import</button>
+  <div class="row-space" style="margin-bottom:6px">
+    <span style="font-family:'Bricolage Grotesque',sans-serif;font-weight:700">Recurring (${S.recurring.length})</span>
+    <button class="ghost" id="sAddRec" style="flex:0 0 auto;padding:7px 13px;font-size:12px;border-radius:10px">＋ Add</button>
   </div>
-  <input type="file" id="importFile" accept=".json" style="display:none">
+  <div style="font-size:11px;color:var(--soft);margin-bottom:8px">Saved entries you can one-tap when adding spending.</div>`;
+  if (!S.recurring.length) h += `<div class="empty" style="padding:8px 0">None yet.</div>`;
+  for (const r of S.recurring) { const c = CAT[r.category] || CAT.other; h += `<div class="rec-row"><div class="info"><div class="nm">${esc(r.note || c.label)}</div><div class="mt">${c.icon} ${c.label} · ${fmt(r.amount)}</div></div><button class="del" data-delrec="${esc(r.id)}">×</button></div>`; }
+  h += `<div class="divider"></div>
+  <div class="btnrow">
+    <button class="ghost" id="exportBtn">⬇ Export backup</button>
+  </div>
   <div class="btnrow">
     <button class="ghost" id="resetBtn" style="color:var(--danger)">Reset all</button>
     <button class="primary" id="saveSet">Save</button>
@@ -1132,15 +1235,55 @@ function openSettings() {
   const signOutBtn = document.getElementById('signOutBtn');
   if (signOutBtn) signOutBtn.onclick = doSignOut;
   document.getElementById('exportBtn').onclick = exportData;
-  document.getElementById('importBtn').onclick = () => document.getElementById('importFile').click();
-  document.getElementById('importFile').onchange = (e) => { if (e.target.files[0]) importData(e.target.files[0]); };
   document.getElementById('resetBtn').onclick = () => { if (confirm('Erase everything?')) { resetAll(); closeSheet(); view = 'onboarding'; renderOnboarding(); } };
   scrim.querySelectorAll('[data-editloan]').forEach((el) => (el.onclick = () => { closeSheet(); openLoanForm(el.dataset.editloan, renderContent); }));
   scrim.querySelectorAll('[data-editsav]').forEach((el) => (el.onclick = () => { closeSheet(); openSavingsForm(el.dataset.editsav, renderContent); }));
   const gi = (id) => parseInt((document.getElementById(id).value || '').replace(/[^\d]/g, '')) || 0;
-  document.getElementById('sAddLoan').onclick = () => { S.income = gi('s_income'); S.budget = gi('s_budget'); persistSettings(); closeSheet(); openLoanForm(null, renderContent); };
-  document.getElementById('sAddSav').onclick = () => { S.income = gi('s_income'); S.budget = gi('s_budget'); persistSettings(); closeSheet(); openSavingsForm(null, renderContent); };
-  document.getElementById('saveSet').onclick = () => { S.income = gi('s_income'); S.budget = gi('s_budget'); persistSettings(); closeSheet(); renderContent(); };
+  const readSettings = () => {
+    S.income = gi('s_income'); S.budget = gi('s_budget');
+    const cb = {};
+    for (const c of CATEGORIES) { const v = gi('cb_' + c.id); if (v > 0) cb[c.id] = v; }
+    S.catBudgets = cb;
+  };
+  document.getElementById('sAddLoan').onclick = () => { readSettings(); persistSettings(); closeSheet(); openLoanForm(null, renderContent); };
+  document.getElementById('sAddSav').onclick = () => { readSettings(); persistSettings(); closeSheet(); openSavingsForm(null, renderContent); };
+  document.getElementById('sAddRec').onclick = () => { readSettings(); persistSettings(); openRecurringForm(); };
+  scrim.querySelectorAll('[data-delrec]').forEach((b) => (b.onclick = () => {
+    if (!confirm('Delete this recurring entry?')) return;
+    readSettings();
+    S.recurring = S.recurring.filter((x) => x.id !== b.dataset.delrec);
+    persistSettings(); openSettings(); toast('Recurring deleted');
+  }));
+  document.getElementById('saveSet').onclick = () => { readSettings(); persistSettings(); closeSheet(); renderContent(); toast('Settings saved'); };
+}
+
+// Add a reusable spending template (rent, subscription, etc.).
+function openRecurringForm() {
+  let selCat = 'bills';
+  const catGrid = () => CATEGORIES.map((c) => `<div class="cat-pick${selCat === c.id ? ' selected' : ''}" data-cat="${c.id}"><span class="icon">${c.icon}</span><span class="label">${c.label}</span></div>`).join('');
+  scrim.innerHTML = `<div class="sheet">
+    <h2>Add recurring</h2>
+    <div class="hint">A reusable entry you can one-tap when adding spending.</div>
+    <div class="amount-prefix">Amount (₮)</div>
+    <input class="amount-input" id="rc_amount" inputmode="numeric" placeholder="0">
+    <div class="cat-grid">${catGrid()}</div>
+    <label class="set-label">Label</label>
+    <input class="set-input" id="rc_note" placeholder="e.g. Rent, Netflix, Gym">
+    <div class="btnrow">
+      <button class="ghost" id="rc_cancel">Cancel</button>
+      <button class="primary" id="rc_save">Add</button>
+    </div></div>`;
+  scrim.classList.add('open');
+  document.getElementById('rc_amount').focus();
+  document.getElementById('rc_cancel').onclick = () => openSettings();
+  scrim.querySelectorAll('.cat-pick').forEach((btn) => (btn.onclick = () => { selCat = btn.dataset.cat; scrim.querySelectorAll('.cat-pick').forEach((b) => b.classList.toggle('selected', b.dataset.cat === selCat)); }));
+  document.getElementById('rc_save').onclick = () => {
+    const amount = parseInt((document.getElementById('rc_amount').value || '').replace(/[^\d]/g, '')) || 0;
+    if (!amount) { alert('Enter an amount.'); return; }
+    const note = (document.getElementById('rc_note').value || '').trim();
+    S.recurring.push({ id: 'rec_' + Date.now(), note, amount, category: selCat });
+    persistSettings(); openSettings(); toast('Recurring added');
+  };
 }
 
 // ── Auth ───────────────────────────────────────────────────────────────────
@@ -1243,20 +1386,6 @@ function exportData() {
     setTimeout(() => URL.revokeObjectURL(url), 1500);
   } catch (e) { alert('Export failed.'); }
 }
-function importData(file) {
-  const r = new FileReader();
-  r.onload = () => {
-    try {
-      const obj = JSON.parse(r.result);
-      if (obj && typeof obj.cursor === 'number') {
-        importAll(migrate(obj)); closeSheet();
-        view = S.onboarded ? 'shell' : 'onboarding';
-        if (view === 'shell') renderShell(); else renderOnboarding();
-      } else alert('Invalid backup file.');
-    } catch (e) { alert('Could not read that file.'); }
-  };
-  r.readAsText(file);
-}
 
 // ── Boot ───────────────────────────────────────────────────────────────────
 let booted = false;
@@ -1286,6 +1415,7 @@ if (!configured) {
     currentUser = user;
     if (!user) {
       detachListeners();
+      closeSheet();
       try { localStorage.removeItem(UIDKEY); } catch (e) {}
       view = 'login'; booted = false; renderLogin();
       return;
