@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Loan Payoff</title>
+
+  <!-- PWA -->
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#191B21">
+
+  <!-- iOS "Add to Home Screen" -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Payoff">
+  <link rel="apple-touch-icon" href="icon.svg">
+
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+:root{
+  --paper:#E9EAEE;--card:#FFFFFF;--ink:#191B21;--soft:#5A5F6B;--faint:#9499A3;--rule:#DADCE2;
+  --indigo:#2B2D77;--emerald:#147A5C;--burnt:#C2410C;--danger:#B42318;
+  --c-toki:#C2410C;--c-camera:#147A5C;--c-daily:#2B2D77;--c-car:#566072;
+  --shadow:0 1px 2px rgba(20,22,30,.06),0 8px 24px rgba(20,22,30,.06);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--paper)}
+#app{font-family:'IBM Plex Mono',ui-monospace,monospace;color:var(--ink);max-width:480px;margin:0 auto;padding:18px 16px calc(60px + env(safe-area-inset-bottom));-webkit-font-smoothing:antialiased}
+.mono{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
+
+.hero{background:var(--ink);color:#fff;border-radius:18px;padding:22px 20px 20px;overflow:hidden;box-shadow:var(--shadow)}
+.hero .eyebrow{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:#9aa0ad;font-weight:500}
+.hero .date{font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:54px;line-height:1;margin-top:8px;letter-spacing:-.02em;transition:color .35s ease}
+.hero .date.flash{color:#7BE3C0}
+.hero .sub{margin-top:6px;font-size:13px;color:#c2c7d0}
+.hero .sub b{color:#fff;font-weight:600}
+.bar{margin-top:18px;height:10px;border-radius:6px;background:rgba(255,255,255,.14);overflow:hidden;display:flex}
+.bar>span{display:block;height:100%;background:linear-gradient(90deg,#7BE3C0,#147A5C);border-radius:6px;transition:width .5s cubic-bezier(.22,1,.36,1)}
+.barlabel{display:flex;justify-content:space-between;margin-top:8px;font-size:11px;color:#9aa0ad}
+
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+.stat{background:var(--card);border-radius:14px;padding:13px 14px;box-shadow:var(--shadow)}
+.stat .k{font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
+.stat .v{font-family:'Bricolage Grotesque',sans-serif;font-weight:700;font-size:20px;margin-top:3px;letter-spacing:-.01em}
+
+.seclabel{display:flex;align-items:baseline;justify-content:space-between;margin:24px 4px 10px}
+.seclabel .t{font-family:'Bricolage Grotesque',sans-serif;font-weight:700;font-size:15px}
+.seclabel .m{font-size:12px;color:var(--soft)}
+
+.loan{background:var(--card);border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:var(--shadow);border-left:4px solid var(--ac);cursor:pointer;transition:transform .08s}
+.loan:active{transform:scale(.99)}
+.loan.done{opacity:.62}
+.loan .top{display:flex;align-items:center;justify-content:space-between}
+.loan .name{font-family:'Bricolage Grotesque',sans-serif;font-weight:700;font-size:15px;display:flex;align-items:center;gap:8px}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--ac);flex:none}
+.loan .rate{font-size:11px;color:var(--soft);background:var(--paper);padding:3px 7px;border-radius:20px}
+.loan .balrow{display:flex;align-items:flex-end;justify-content:space-between;margin-top:10px}
+.loan .bal{font-family:'Bricolage Grotesque',sans-serif;font-weight:700;font-size:23px;letter-spacing:-.01em}
+.loan .plan{text-align:right;font-size:11px;color:var(--soft)}
+.loan .plan b{display:block;font-family:'Bricolage Grotesque',sans-serif;font-size:15px;color:var(--ink);font-weight:700;margin-top:1px}
+.lprog{height:5px;border-radius:4px;background:var(--paper);margin-top:11px;overflow:hidden}
+.lprog>span{display:block;height:100%;background:var(--ac);border-radius:4px;transition:width .5s ease}
+.donetag{font-size:11px;color:var(--emerald);font-weight:600;letter-spacing:.04em}
+.chev{color:var(--faint);font-size:18px;margin-left:4px}
+
+.live{background:var(--card);border-radius:14px;padding:14px 16px;margin-top:6px;box-shadow:var(--shadow);display:flex;align-items:center;justify-content:space-between;border-left:4px solid var(--emerald)}
+.live.warn{border-left-color:var(--burnt)}.live.bad{border-left-color:var(--danger)}
+.live .k{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
+.live .sub{font-size:11px;color:var(--soft);margin-top:2px}
+.live .v{font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:24px}
+
+.budget{background:var(--card);border-radius:14px;padding:14px 16px;margin-top:10px;box-shadow:var(--shadow);cursor:pointer;border-left:4px solid var(--indigo)}
+.budget .row{display:flex;justify-content:space-between;align-items:baseline}
+.budget .k{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
+.budget .v{font-family:'Bricolage Grotesque',sans-serif;font-weight:700;font-size:18px}
+.budget .bbar{height:7px;border-radius:5px;background:var(--paper);margin-top:9px;overflow:hidden}
+.budget .bbar>span{display:block;height:100%;border-radius:5px;transition:width .5s ease}
+
+.btnrow{display:flex;gap:10px;margin-top:18px}
+button{font-family:inherit;cursor:pointer;border:none}
+.primary{flex:1;background:var(--ink);color:#fff;border-radius:13px;padding:15px;font-size:15px;font-weight:600;font-family:'Bricolage Grotesque',sans-serif;transition:transform .08s}
+.primary:active{transform:scale(.985)}
+.primary:disabled{background:#B9BCC4}
+.ghost{flex:1;background:var(--card);color:var(--ink);border-radius:13px;padding:14px 12px;font-size:13px;font-weight:600;box-shadow:var(--shadow)}
+
+.scrim{position:fixed;inset:0;background:rgba(20,22,30,.5);backdrop-filter:blur(2px);display:none;align-items:flex-end;justify-content:center;z-index:50}
+.scrim.open{display:flex}
+.sheet{background:var(--paper);width:100%;max-width:480px;border-radius:22px 22px 0 0;padding:20px 18px calc(20px + env(safe-area-inset-bottom));max-height:90vh;overflow-y:auto;animation:rise .28s cubic-bezier(.22,1,.36,1)}
+@keyframes rise{from{transform:translateY(40px);opacity:.4}to{transform:translateY(0);opacity:1}}
+.sheet h2{font-family:'Bricolage Grotesque',sans-serif;font-size:19px;font-weight:800;display:flex;align-items:center;gap:9px}
+.sheet .hint{font-size:12px;color:var(--soft);margin-top:3px;margin-bottom:14px}
+.field{background:var(--card);border-radius:13px;padding:12px 14px;margin-bottom:9px;border-left:4px solid var(--ac)}
+.field .flabel{display:flex;justify-content:space-between;align-items:center}
+.field .fn{font-family:'Bricolage Grotesque',sans-serif;font-weight:700;font-size:14px;display:flex;align-items:center;gap:7px}
+.field .fmeta{font-size:11px;color:var(--soft)}
+.field input{width:100%;border:none;background:transparent;font-family:'Bricolage Grotesque',sans-serif;font-weight:700;font-size:21px;color:var(--ink);margin-top:6px;outline:none;font-variant-numeric:tabular-nums}
+.field .quick{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+.chip{font-size:11px;padding:5px 9px;border-radius:20px;background:var(--paper);color:var(--soft);border:1px solid var(--rule)}
+.chip:active{background:var(--ink);color:#fff}
+.scard{background:var(--card);border-radius:13px;padding:12px 14px;margin-bottom:10px;border-left:4px solid var(--ac)}
+.scard .sh{font-family:'Bricolage Grotesque',sans-serif;font-weight:700;font-size:14px;display:flex;align-items:center;gap:7px;margin-bottom:6px}
+.set-input{width:100%;border:1px solid var(--rule);background:#fff;border-radius:10px;padding:10px 12px;font-family:'IBM Plex Mono',monospace;font-size:14px;color:var(--ink);margin-top:3px;font-variant-numeric:tabular-nums}
+.set-label{font-size:11px;color:var(--soft);margin-top:9px;display:block}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.empty{text-align:center;color:var(--soft);font-size:12px;padding:18px 0}
+
+.dstat{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin:14px 0}
+.dstat>div{background:var(--card);border-radius:12px;padding:11px 13px}
+.dstat .k{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
+.dstat .v{font-family:'Bricolage Grotesque',sans-serif;font-weight:700;font-size:17px;margin-top:2px}
+.chartwrap{background:var(--card);border-radius:13px;padding:12px 10px 4px;box-shadow:var(--shadow)}
+.legend{display:flex;gap:14px;justify-content:center;font-size:11px;color:var(--soft);margin-top:4px;padding-bottom:6px}
+.legend span{display:inline-flex;align-items:center;gap:5px}
+.legend i{width:14px;height:0;border-top:2px solid var(--ac);display:inline-block}
+.legend i.dash{border-top-style:dashed;opacity:.5}
+.histrow{display:flex;justify-content:space-between;align-items:center;background:var(--card);border-radius:11px;padding:10px 13px;margin-bottom:7px;font-size:13px}
+.histrow .mlab{font-family:'Bricolage Grotesque',sans-serif;font-weight:700}
+.pill{font-size:11px;padding:3px 8px;border-radius:20px;font-weight:600}
+
+.footnote{margin-top:22px;font-size:11px;color:var(--faint);line-height:1.5;text-align:center}
+.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
+.topbar .title{font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:17px}
+.iconbtn{background:var(--card);width:38px;height:38px;border-radius:11px;box-shadow:var(--shadow);font-size:17px;display:flex;align-items:center;justify-content:center}
+.cele{background:linear-gradient(135deg,#147A5C,#7BE3C0);color:#fff;border-radius:18px;padding:26px 20px;text-align:center;box-shadow:var(--shadow)}
+.cele .big{font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:30px;margin-bottom:6px}
+.welcome{font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:26px;margin-top:8px;line-height:1.12}
+.divider{height:1px;background:var(--rule);margin:14px 0}
+</style>
+</head>
+<body>
+
+<div id="app"></div>
+<div class="scrim" id="scrim"></div>
+
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js'));
+}
+
+(function(){
+  const KEY='payoff_v2';
+
+  let mem=null;
+  async function load(){if(window.storage){try{const r=await window.storage.get(KEY);if(r&&r.value)return JSON.parse(r.value);}catch(e){}return null;}return mem;}
+  async function save(s){mem=s;if(window.storage){try{await window.storage.set(KEY,JSON.stringify(s));}catch(e){}}}
+
+  function defaults(){
+    return {startAbs:0,cursor:0,income:0,expenses:0,
+      loans:{
+        toki:{name:'Toki',bal:0,orig:0,rate:0.013,type:'toki',plan:0},
+        camera:{name:'Camera',bal:0,orig:0,rate:0.011,type:'inst',plan:0},
+        daily:{name:'Car deposit',bal:0,orig:0,rate:0.011,type:'inst',plan:0},
+        car:{name:'Car loan',bal:0,orig:0,rate:0.017,type:'inst',plan:0},
+      },
+      order:['toki','camera','daily','car'],history:[]};
+  }
+  let S=defaults();
+
+  const fmt=n=>'₮'+Math.round(n).toLocaleString('en-US');
+  const fmtShort=n=>{n=Math.round(n);return n>=1e6?'₮'+(n/1e6).toFixed(n%1e6?1:0)+'M':'₮'+n.toLocaleString('en-US')};
+  function monthLabel(abs){const base=2026*12+5;const t=base+abs;return `${Math.floor(t/12)}.${String((t%12)+1).padStart(2,'0')}`;}
+  const ac=id=>`var(--c-${id})`;
+
+  function plannedFor(L,income,expenses){
+    const out={};
+    ['camera','daily','car'].forEach(id=>{const l=L[id];if(!l||l.bal<=0.5){out[id]=0;return;}out[id]=Math.min(l.plan,l.bal*(1+l.rate));});
+    const t=L.toki; if(!t||t.bal<=0.5){out.toki=0;return out;}
+    const tInt=t.bal*t.rate,tMinPrin=t.bal*0.10,tMin=tInt+tMinPrin;
+    const others=(out.camera||0)+(out.daily||0)+(out.car||0)+tMin;
+    let surplus=(income-expenses)-others; if(surplus<0)surplus=0;
+    const extra=Math.min(surplus,Math.max(0,t.bal-tMinPrin));
+    out.toki=tInt+Math.min(t.bal,tMinPrin+extra);
+    return out;
+  }
+  function clone(loans){const L={};for(const k in loans)L[k]={...loans[k]};return L;}
+
+  function simulate(){
+    const L=clone(S.loans); const snaps=[]; let guard=0; let abs=S.startAbs+S.cursor; let totalInt=0;
+    const any=()=>S.order.some(id=>L[id].bal>0.5);
+    const hasPlan=S.order.some(id=>id==='toki'?L.toki.bal>0:L[id].plan>0);
+    while(any()&&guard<1200&&hasPlan){
+      snaps.push({abs,bals:Object.fromEntries(S.order.map(id=>[id,L[id].bal]))});
+      const plan=plannedFor(L,S.income,S.expenses);
+      const totalPlan=S.order.reduce((s,id)=>s+(plan[id]||0),0);
+      if(totalPlan<=0)break;
+      for(const id of S.order){const l=L[id];if(l.bal<=0.5){l.bal=0;continue;}totalInt+=l.bal*l.rate;l.bal=Math.max(0,l.bal*(1+l.rate)-(plan[id]||0));}
+      abs++; guard++;
+    }
+    snaps.push({abs,bals:Object.fromEntries(S.order.map(id=>[id,Math.max(0,L[id].bal)]))});
+    return {snaps,months:guard,totalInt,payoffAbs:S.startAbs+S.cursor+Math.max(0,guard-1)};
+  }
+
+  const appEl=document.getElementById('app');
+  const scrim=document.getElementById('scrim');
+  let lastDate=null;
+
+  function render(){
+    const totalBal=S.order.reduce((s,id)=>s+S.loans[id].bal,0);
+    const needsSetup=S.cursor===0 && (S.income<=0 || totalBal<=0.5);
+
+    let html=`<div class="topbar"><div class="title">Loan Payoff</div>
+      <button class="iconbtn" id="settingsBtn" aria-label="Settings">⚙</button></div>`;
+
+    if(needsSetup){
+      html+=`<div class="hero"><div class="eyebrow">Welcome</div>
+        <div class="welcome">Set up<br>your loans</div>
+        <div class="sub" style="margin-top:11px">Add each loan's balance, rate and monthly payment, plus your income and budget. Everything stays on this device.</div></div>
+        <div class="btnrow"><button class="primary" id="setupBtn">Set up now</button></div>
+        <div class="footnote">Nothing you enter is uploaded anywhere — it's saved only in this browser.</div>`;
+      appEl.innerHTML=html;
+      document.getElementById('settingsBtn').onclick=openSettings;
+      document.getElementById('setupBtn').onclick=openSettings;
+      return;
+    }
+
+    const allDone=totalBal<=0.5;
+    const sim=simulate();
+    const plan=plannedFor(clone(S.loans),S.income,S.expenses);
+    const loanTotal=S.order.reduce((s,id)=>s+(plan[id]||0),0);
+    const leftToLive=S.income-loanTotal;
+    const curMonth=monthLabel(S.startAbs+S.cursor);
+    const totalSpan=S.cursor+sim.months;
+    const pct=totalSpan?Math.min(100,(S.cursor/totalSpan)*100):100;
+
+    if(allDone){
+      html+=`<div class="cele"><div class="big">🎉 Debt-free!</div><div>Every loan is paid off. Nicely done.</div></div>
+        <div class="btnrow"><button class="ghost" id="undoBtn">↩ Undo last month</button></div>`;
+    }else{
+      const payoff=monthLabel(sim.payoffAbs);
+      const flash=(lastDate&&lastDate!==payoff)?' flash':''; lastDate=payoff;
+      html+=`<div class="hero">
+        <div class="eyebrow">Debt-free by</div>
+        <div class="date${flash}" id="payoffDate">${payoff}</div>
+        <div class="sub"><b>${sim.months}</b> payments left · starting <b>${curMonth}</b></div>
+        <div class="bar"><span style="width:${pct}%"></span></div>
+        <div class="barlabel"><span>${S.cursor} paid</span><span>${totalSpan} total</span></div></div>
+      <div class="stats">
+        <div class="stat"><div class="k">Total balance</div><div class="v mono">${fmtShort(totalBal)}</div></div>
+        <div class="stat"><div class="k">Interest left</div><div class="v mono">${fmtShort(sim.totalInt)}</div></div></div>
+      <div class="seclabel"><div class="t">This month</div><div class="m mono">${curMonth}</div></div>`;
+
+      for(const id of S.order){
+        const l=S.loans[id]; const done=l.bal<=0.5;
+        const prog=l.orig>0?Math.min(100,(1-l.bal/l.orig)*100):0;
+        const ratePct=(l.rate*100).toFixed(2).replace(/\.?0+$/,'')+'%/mo';
+        html+=`<div class="loan ${done?'done':''}" style="--ac:${ac(id)}" data-loan="${id}">
+          <div class="top"><div class="name"><span class="dot"></span>${l.name}</div>
+          <div style="display:flex;align-items:center">${done?'<span class="donetag">✓ Paid off</span>':`<span class="rate">${id==='toki'?'10%+'+(l.rate*100).toFixed(1)+'%':ratePct}</span>`}<span class="chev">›</span></div></div>`;
+        if(!done){
+          html+=`<div class="balrow">
+            <div><div style="font-size:10.5px;color:var(--faint);text-transform:uppercase;letter-spacing:.08em">Balance</div>
+              <div class="bal mono">${fmt(l.bal)}</div></div>
+            <div class="plan">pay this month<b class="mono">${fmt(plan[id]||0)}</b></div></div>
+          <div class="lprog"><span style="width:${prog}%"></span></div>`;
+        }
+        html+=`</div>`;
+      }
+
+      const liveCls=leftToLive>=S.expenses?'':(leftToLive>=0?'warn':'bad');
+      html+=`<div class="live ${liveCls}"><div><div class="k">Left to live on</div>
+          <div class="sub">${leftToLive<0?'Over your income':'After loan payments'}</div></div>
+        <div class="v mono" style="color:${leftToLive<0?'var(--danger)':leftToLive>=S.expenses?'var(--emerald)':'var(--burnt)'}">${fmt(leftToLive)}</div></div>`;
+
+      const spends=S.history.filter(h=>typeof h.spend==='number');
+      const lastSpend=spends.length?spends[spends.length-1].spend:null;
+      const target=S.expenses;
+      const bpct=lastSpend!=null&&target>0?Math.min(100,(lastSpend/target)*100):0;
+      const over=lastSpend!=null&&lastSpend>target;
+      html+=`<div class="seclabel"><div class="t">Monthly budget</div><div class="m mono">target ${fmtShort(target)}</div></div>
+        <div class="budget" id="budgetCard">
+          <div class="row"><span class="k">Last month spent</span>
+            <span class="v mono" style="color:${lastSpend==null?'var(--faint)':(over?'var(--danger)':'var(--emerald)')}">${lastSpend==null?'—':fmt(lastSpend)}</span></div>
+          <div class="bbar"><span style="width:${bpct}%;background:${over?'var(--danger)':'var(--indigo)'}"></span></div>
+          <div class="row" style="margin-top:7px"><span style="font-size:11px;color:var(--soft)">${spends.length} month${spends.length===1?'':'s'} tracked</span>
+            <span style="font-size:11px;color:var(--soft)">tap for history ›</span></div></div>`;
+
+      html+=`<div class="btnrow"><button class="primary" id="logBtn">＋ Log this month</button>
+        ${S.cursor>0?'<button class="ghost" id="undoBtn" style="flex:0 0 auto">↩</button>':''}</div>`;
+    }
+
+    html+=`<div class="footnote">Estimates use monthly interest. Your bank statement is the exact source of truth.<br>Data saves on this device — use Export in ⚙ to back it up.</div>`;
+    appEl.innerHTML=html;
+
+    const sb=document.getElementById('settingsBtn'); if(sb)sb.onclick=openSettings;
+    const lb=document.getElementById('logBtn'); if(lb)lb.onclick=openLog;
+    const ub=document.getElementById('undoBtn'); if(ub)ub.onclick=undo;
+    const bc=document.getElementById('budgetCard'); if(bc)bc.onclick=openBudget;
+    appEl.querySelectorAll('[data-loan]').forEach(el=>el.onclick=()=>openDetail(el.dataset.loan));
+    if(document.querySelector('.date.flash'))setTimeout(()=>{const d=document.getElementById('payoffDate');if(d)d.classList.remove('flash');},650);
+  }
+
+  function drawChart(actual,projected,id){
+    const W=320,H=150,Lp=10,Rp=10,Tp=12,Bp=22;
+    const all=actual.concat(projected);
+    if(all.length<2)return '<div class="empty">Log a payment to start the trend line.</div>';
+    const xs=all.map(p=>p.abs),ys=all.map(p=>p.bal);
+    const minX=Math.min(...xs),maxX=Math.max(...xs),maxY=Math.max(...ys,1);
+    const x=a=>Lp+(maxX===minX?0:(a-minX)/(maxX-minX))*(W-Lp-Rp);
+    const y=b=>Tp+(1-b/maxY)*(H-Tp-Bp);
+    const path=arr=>arr.map((p,i)=>(i?'L':'M')+x(p.abs).toFixed(1)+' '+y(p.bal).toFixed(1)).join(' ');
+    const col=`var(--c-${id})`; const baseY=y(0);
+    let s=`<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block">`;
+    s+=`<line x1="${Lp}" y1="${baseY}" x2="${W-Rp}" y2="${baseY}" stroke="var(--rule)" stroke-width="1"/>`;
+    if(actual.length>=2){
+      const area=`${path(actual)} L ${x(actual[actual.length-1].abs).toFixed(1)} ${baseY} L ${x(actual[0].abs).toFixed(1)} ${baseY} Z`;
+      s+=`<path d="${area}" fill="${col}" opacity="0.08"/>`;
+      s+=`<path d="${path(actual)}" fill="none" stroke="${col}" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>`;
+    }
+    if(projected.length>=2)s+=`<path d="${path(projected)}" fill="none" stroke="${col}" stroke-width="2" stroke-dasharray="4 4" opacity="0.45"/>`;
+    const cur=actual[actual.length-1];
+    s+=`<circle cx="${x(cur.abs).toFixed(1)}" cy="${y(cur.bal).toFixed(1)}" r="3.6" fill="${col}"/>`;
+    s+=`<text x="${Lp}" y="${H-6}" font-size="9" fill="var(--faint)">${monthLabel(minX)}</text>`;
+    s+=`<text x="${W-Rp}" y="${H-6}" font-size="9" fill="var(--faint)" text-anchor="end">${monthLabel(maxX)}</text></svg>`;
+    return s;
+  }
+
+  function openDetail(id){
+    const l=S.loans[id];
+    const actual=[];
+    for(let k=0;k<S.cursor;k++){const h=S.history[k]; if(h&&h.prev&&typeof h.prev[id]==='number')actual.push({abs:S.startAbs+k,bal:h.prev[id]});}
+    actual.push({abs:S.startAbs+S.cursor,bal:l.bal});
+    const sim=simulate();
+    const projected=sim.snaps.map(sn=>({abs:sn.abs,bal:sn.bals[id]}));
+    let intPaid=0,paymentsMade=0;
+    for(let k=0;k<S.cursor;k++){const h=S.history[k]; if(!h)continue; const pb=(h.prev&&h.prev[id])||0; intPaid+=pb*l.rate; if(h.pays&&h.pays[id]>0)paymentsMade++;}
+    const paidOff=l.bal<=0.5;
+    let loanPayoff='—';
+    if(paidOff)loanPayoff='Paid off'; else{const hit=projected.find(p=>p.bal<=0.5);loanPayoff=hit?monthLabel(hit.abs):'—';}
+    const pct=l.orig>0?Math.round((1-l.bal/l.orig)*100):0;
+    const ratePct=id==='toki'?('10% + '+(l.rate*100).toFixed(1)+'%/mo'):((l.rate*100).toFixed(2).replace(/\.?0+$/,'')+'%/mo');
+    let h=`<div class="sheet"><h2><span class="dot" style="background:${ac(id)};width:12px;height:12px"></span>${l.name}</h2>
+      <div class="hint">Solid = actually paid. Dashed = projected if you keep to plan. Rate ${ratePct}.</div>
+      <div class="chartwrap">${drawChart(actual,projected,id)}
+        <div class="legend"><span style="--ac:${ac(id)}"><i></i>Actual</span><span style="--ac:${ac(id)}"><i class="dash"></i>Projected</span></div></div>
+      <div class="dstat">
+        <div><div class="k">Balance</div><div class="v mono">${fmt(l.bal)}</div></div>
+        <div><div class="k">Paid off</div><div class="v mono">${pct}%</div></div>
+        <div><div class="k">Original</div><div class="v mono">${fmtShort(l.orig)}</div></div>
+        <div><div class="k">Interest paid</div><div class="v mono">${fmtShort(intPaid)}</div></div>
+        <div><div class="k">Payments made</div><div class="v mono">${paymentsMade}</div></div>
+        <div><div class="k">Gone by</div><div class="v mono">${loanPayoff}</div></div></div>
+      <div class="btnrow"><button class="primary" id="closeDetail">Close</button></div></div>`;
+    scrim.innerHTML=h; scrim.classList.add('open');
+    document.getElementById('closeDetail').onclick=closeSheet;
+  }
+
+  function openBudget(){
+    const target=S.expenses;
+    let h=`<div class="sheet"><h2>Budget history</h2>
+      <div class="hint">Living spending each month vs your ${fmt(target)} target.</div>`;
+    const spends=[];
+    for(let k=0;k<S.cursor;k++){const e=S.history[k]; if(e&&typeof e.spend==='number')spends.push({month:e.month,spend:e.spend});}
+    if(!spends.length)h+=`<div class="empty">No months logged yet. Use "Log this month" and enter your living spending.</div>`;
+    else{
+      const avg=spends.reduce((s,x)=>s+x.spend,0)/spends.length;
+      h+=`<div class="dstat" style="margin-top:0">
+        <div><div class="k">Average spent</div><div class="v mono">${fmt(avg)}</div></div>
+        <div><div class="k">Target</div><div class="v mono">${fmt(target)}</div></div></div>`;
+      spends.slice().reverse().forEach(x=>{
+        const over=x.spend>target; const diff=Math.abs(x.spend-target);
+        h+=`<div class="histrow"><span class="mlab">${x.month}</span>
+          <span style="display:flex;align-items:center;gap:9px"><span class="mono">${fmt(x.spend)}</span>
+            <span class="pill" style="background:${over?'#FBE9E7':'#E7F4EF'};color:${over?'var(--danger)':'var(--emerald)'}">${over?'+'+fmtShort(diff):'−'+fmtShort(diff)}</span></span></div>`;
+      });
+    }
+    h+=`<div class="btnrow"><button class="primary" id="closeBudget">Close</button></div></div>`;
+    scrim.innerHTML=h; scrim.classList.add('open');
+    document.getElementById('closeBudget').onclick=closeSheet;
+  }
+
+  function openLog(){
+    const plan=plannedFor(clone(S.loans),S.income,S.expenses);
+    const curMonth=monthLabel(S.startAbs+S.cursor);
+    let h=`<div class="sheet"><h2>${curMonth}</h2>
+      <div class="hint">Enter what you actually paid and spent. Amounts can be less than planned.</div>`;
+    for(const id of S.order){
+      const l=S.loans[id]; if(l.bal<=0.5)continue;
+      const planned=Math.round(plan[id]||0); const interest=Math.round(l.bal*l.rate);
+      h+=`<div class="field" style="--ac:${ac(id)}">
+        <div class="flabel"><div class="fn"><span class="dot" style="background:${ac(id)}"></span>${l.name}</div>
+          <div class="fmeta mono">bal ${fmt(l.bal)}</div></div>
+        <input id="in_${id}" inputmode="numeric" value="${planned.toLocaleString('en-US')}">
+        <div class="quick">
+          <span class="chip" data-set="${id}" data-v="${planned}">Planned ${fmtShort(planned)}</span>
+          <span class="chip" data-set="${id}" data-v="${interest}">Interest only ${fmtShort(interest)}</span>
+          <span class="chip" data-set="${id}" data-v="0">0 (skip)</span></div>
+        <div class="fmeta mono" style="margin-top:6px">interest: ${fmt(interest)}</div></div>`;
+    }
+    h+=`<div class="field" style="--ac:var(--indigo)">
+        <div class="flabel"><div class="fn"><span class="dot" style="background:var(--indigo)"></span>Living spending</div>
+          <div class="fmeta mono">target ${fmt(S.expenses)}</div></div>
+        <input id="in_spend" inputmode="numeric" value="${S.expenses.toLocaleString('en-US')}">
+        <div class="quick"><span class="chip" data-set="spend" data-v="${S.expenses}">On target ${fmtShort(S.expenses)}</span>
+          <span class="chip" data-set="spend" data-v="${Math.round(S.expenses*0.8)}">Under ${fmtShort(Math.round(S.expenses*0.8))}</span></div></div>`;
+    h+=`<div class="btnrow"><button class="ghost" id="cancelLog">Cancel</button><button class="primary" id="saveLog">Save</button></div></div>`;
+    scrim.innerHTML=h; scrim.classList.add('open');
+    scrim.querySelectorAll('.chip').forEach(c=>c.onclick=()=>{document.getElementById('in_'+c.dataset.set).value=Number(c.dataset.v).toLocaleString('en-US');});
+    scrim.querySelectorAll('.field input').forEach(inp=>{
+      inp.onblur=()=>{const n=parseInt(inp.value.replace(/[^\d]/g,''))||0;inp.value=n.toLocaleString('en-US');};
+      inp.onfocus=()=>{inp.value=inp.value.replace(/[^\d]/g,'');};});
+    document.getElementById('cancelLog').onclick=closeSheet;
+    document.getElementById('saveLog').onclick=()=>{
+      const prev={},pays={};
+      for(const id of S.order){
+        prev[id]=S.loans[id].bal;
+        if(S.loans[id].bal<=0.5){pays[id]=0;continue;}
+        const inp=document.getElementById('in_'+id);
+        const pay=inp?(parseInt(inp.value.replace(/[^\d]/g,''))||0):0;
+        pays[id]=pay; const l=S.loans[id]; l.bal=Math.max(0,l.bal*(1+l.rate)-pay);
+      }
+      const sp=document.getElementById('in_spend');
+      const spend=sp?(parseInt(sp.value.replace(/[^\d]/g,''))||0):S.expenses;
+      S.history.push({month:monthLabel(S.startAbs+S.cursor),pays,prev,spend});
+      S.cursor++; save(S); closeSheet(); render();
+    };
+  }
+
+  function undo(){
+    if(!S.history.length)return;
+    const last=S.history.pop();
+    for(const id in last.prev)S.loans[id].bal=last.prev[id];
+    S.cursor=Math.max(0,S.cursor-1); lastDate=null; save(S); render();
+  }
+
+  function exportData(){
+    try{
+      const blob=new Blob([JSON.stringify(S,null,2)],{type:'application/json'});
+      const url=URL.createObjectURL(blob); const a=document.createElement('a');
+      a.href=url; a.download='payoff-backup-'+new Date().toISOString().slice(0,10)+'.json';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(()=>URL.revokeObjectURL(url),1500);
+    }catch(e){alert('Export failed in this preview. It works when the app is hosted.');}
+  }
+  function importData(file){
+    const r=new FileReader();
+    r.onload=()=>{try{const obj=JSON.parse(r.result);
+      if(obj&&obj.loans&&obj.order&&typeof obj.cursor==='number'){S=obj;lastDate=null;save(S);closeSheet();render();alert('Backup restored.');}
+      else alert('That file does not look like a valid backup.');
+    }catch(e){alert('Could not read that file.');}};
+    r.readAsText(file);
+  }
+
+  function openSettings(){
+    const gpct=v=>{const f=parseFloat(String(v).replace(/[^\d.]/g,''));return isNaN(f)?0:f;};
+    let h=`<div class="sheet"><h2>Settings</h2>
+      <div class="hint">Set your income, budget, and each loan. Editable any time.</div>
+      <div class="two">
+        <div><label class="set-label">Monthly income</label>
+          <input class="set-input mono" id="s_income" value="${S.income?S.income.toLocaleString('en-US'):''}" placeholder="4,732,000" inputmode="numeric"></div>
+        <div><label class="set-label">Monthly budget</label>
+          <input class="set-input mono" id="s_expenses" value="${S.expenses?S.expenses.toLocaleString('en-US'):''}" placeholder="1,500,000" inputmode="numeric"></div>
+      </div>
+      <div class="divider"></div>`;
+    for(const id of S.order){
+      const l=S.loans[id]; const isToki=id==='toki';
+      h+=`<div class="scard" style="--ac:${ac(id)}">
+        <div class="sh"><span class="dot" style="background:${ac(id)}"></span>
+          <input class="set-input" style="margin:0;font-family:'Bricolage Grotesque',sans-serif;font-weight:700;padding:6px 8px" id="s_name_${id}" value="${l.name}"></div>
+        <div class="two">
+          <div><label class="set-label">Current balance</label>
+            <input class="set-input mono" id="s_bal_${id}" value="${l.bal?Math.round(l.bal).toLocaleString('en-US'):''}" placeholder="0" inputmode="numeric"></div>
+          <div><label class="set-label">${isToki?'Interest %/mo':'Rate %/mo'}</label>
+            <input class="set-input mono" id="s_rate_${id}" value="${(l.rate*100)?(l.rate*100).toString():''}" placeholder="${isToki?'1.3':'1.1'}" inputmode="decimal"></div>
+        </div>`;
+      if(isToki) h+=`<div class="set-label" style="margin-top:8px">Toki pays 10% of balance + interest each month (declining). Extra cash is added automatically.</div>`;
+      else h+=`<label class="set-label">Monthly payment</label>
+            <input class="set-input mono" id="s_plan_${id}" value="${l.plan?Math.round(l.plan).toLocaleString('en-US'):''}" placeholder="0" inputmode="numeric">`;
+      h+=`</div>`;
+    }
+    h+=`<div class="divider"></div>
+      <div class="set-label" style="margin-top:0">Backup — save a copy you can restore on another phone.</div>
+      <div class="btnrow" style="margin-top:8px">
+        <button class="ghost" id="exportBtn">⬇ Export backup</button>
+        <button class="ghost" id="importBtn">⬆ Import backup</button></div>
+      <input type="file" id="importFile" accept="application/json,.json" style="display:none">
+      <div class="btnrow"><button class="ghost" id="resetBtn" style="color:var(--danger)">Reset all</button><button class="primary" id="saveSet">Save</button></div></div>`;
+    scrim.innerHTML=h; scrim.classList.add('open');
+    scrim.querySelectorAll('.set-input.mono').forEach(inp=>{inp.onblur=()=>{const raw=inp.value.replace(/[^\d]/g,'');if(inp.id.indexOf('rate')<0){inp.value=raw?parseInt(raw).toLocaleString('en-US'):'';}};});
+    const g=id=>parseInt((document.getElementById(id).value||'').replace(/[^\d]/g,''))||0;
+    document.getElementById('saveSet').onclick=()=>{
+      S.income=g('s_income'); S.expenses=g('s_expenses');
+      for(const id of S.order){
+        const l=S.loans[id];
+        const nm=(document.getElementById('s_name_'+id).value||'').trim(); if(nm)l.name=nm;
+        const nb=g('s_bal_'+id); l.bal=nb; if(nb>l.orig)l.orig=nb;
+        const rt=gpct(document.getElementById('s_rate_'+id).value); if(rt>0)l.rate=rt/100;
+        if(id!=='toki'){const pl=g('s_plan_'+id); l.plan=pl;}
+      }
+      lastDate=null; save(S); closeSheet(); render();
+    };
+    document.getElementById('exportBtn').onclick=exportData;
+    document.getElementById('importBtn').onclick=()=>document.getElementById('importFile').click();
+    document.getElementById('importFile').onchange=e=>{if(e.target.files[0])importData(e.target.files[0]);};
+    document.getElementById('resetBtn').onclick=()=>{if(confirm('Erase everything and start over?')){S=defaults();lastDate=null;save(S);closeSheet();render();}};
+  }
+
+  function closeSheet(){scrim.classList.remove('open');scrim.innerHTML='';}
+  scrim.onclick=e=>{if(e.target===scrim)closeSheet();};
+
+  (async()=>{const saved=await load(); if(saved&&saved.loans)S=saved; render();})();
+})();
+</script>
+</body>
+</html>
