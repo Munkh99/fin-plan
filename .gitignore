@@ -6,9 +6,11 @@
 firebase-debug.log
 firestore-debug.log
 
-# Node (firebase-tools)
+# Node / Vite
 node_modules/
 .npm/
+dist/
+dev-dist/
 
 # Env
 .env
