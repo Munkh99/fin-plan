@@ -15,7 +15,10 @@ import {
 // not a secret. Access is controlled by Firestore security rules + Auth.
 const firebaseConfig = {
   apiKey: 'AIzaSyAJ4Y_9VE23DJ0CuQyJhjbQH-iLeo1mztc',
-  authDomain: 'fin-plan-59c19.firebaseapp.com',
+  // Same origin as the hosted app (.web.app). Using the default *.firebaseapp.com
+  // here makes the sign-in popup cross-origin, so COOP blocks popup-closed
+  // detection and Firebase falls back to a ~20s timeout. Same-origin = instant.
+  authDomain: 'fin-plan-59c19.web.app',
   projectId: 'fin-plan-59c19',
   storageBucket: 'fin-plan-59c19.firebasestorage.app',
   messagingSenderId: '21809874373',
