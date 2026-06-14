@@ -273,6 +273,7 @@ async function migrateRemoteIfNeeded() {
     await runChunked(ops);
     S = parsed;
     persistLocal();
+    reconcile();
   } catch (e) {}
 }
 
@@ -284,6 +285,9 @@ function attachListeners() {
   unsubs.push(onSnapshot(userDoc(), (snap) => {
     const d = snap.data();
     if (!d) return;
+    // Legacy single-blob doc — ignore until migrateRemoteIfNeeded() converts it,
+    // otherwise we'd wipe the view to empty before the real fields are written.
+    if (d.payload && d.schema !== SCHEMA) return;
     S.income = d.income || 0;
     S.budget = d.budget || 0;
     S.onboarded = !!d.onboarded;
@@ -1278,7 +1282,7 @@ if (!configured) {
     appEl.innerHTML = `<div style="text-align:center;padding:80px 0;color:var(--faint);font-size:13px">Loading…</div>`;
   }
 
-  onAuthStateChanged(auth, async (user) => {
+  onAuthStateChanged(auth, (user) => {
     currentUser = user;
     if (!user) {
       detachListeners();
@@ -1292,8 +1296,11 @@ if (!configured) {
       try { localStorage.removeItem(KEY); } catch (e) {}
       S = defaults(); booted = false;
     }
-    await migrateRemoteIfNeeded();
+    // Render immediately — never block on the network. Real-time listeners fire
+    // from the local cache near-instantly and reconcile the view; the one-time
+    // legacy migration runs in the background.
     if (!booted) go();
     attachListeners();
+    migrateRemoteIfNeeded();
   });
 }
