@@ -25,7 +25,6 @@ if ('serviceWorker' in navigator) {
     firebase.initializeApp(FIREBASE_CONFIG);
     auth = firebase.auth();
     db = firebase.firestore();
-    db.enablePersistence({ synchronizeTabs: true }).catch(() => {});
   }
 
   const KEY = 'finplan_v2';
