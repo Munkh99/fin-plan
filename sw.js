@@ -17,8 +17,21 @@ self.addEventListener('activate', e => {
 
 self.addEventListener('fetch', e => {
   const url = e.request.url;
-  // Cache-first for fonts so app works offline after first load
-  if (url.includes('fonts.googleapis.com') || url.includes('fonts.gstatic.com')) {
+
+  // Firebase handles its own offline caching via IndexedDB — don't intercept
+  if (
+    url.includes('firestore.googleapis.com') ||
+    url.includes('identitytoolkit.googleapis.com') ||
+    url.includes('securetoken.googleapis.com') ||
+    url.includes('firebaseapp.com/__/auth')
+  ) return;
+
+  // Cache-first for fonts and Firebase SDK (large, versioned, stable)
+  if (
+    url.includes('fonts.googleapis.com') ||
+    url.includes('fonts.gstatic.com') ||
+    url.includes('gstatic.com/firebasejs')
+  ) {
     e.respondWith(
       caches.open(CACHE).then(cache =>
         cache.match(e.request).then(hit =>
@@ -28,8 +41,11 @@ self.addEventListener('fetch', e => {
     );
     return;
   }
-  // Cache-first for everything else (app shell)
-  e.respondWith(
-    caches.match(e.request).then(hit => hit || fetch(e.request))
-  );
+
+  // Cache-first for local app shell only
+  if (url.startsWith(self.location.origin)) {
+    e.respondWith(
+      caches.match(e.request).then(hit => hit || fetch(e.request))
+    );
+  }
 });
