@@ -127,7 +127,7 @@ function settingsPayload() {
 async function trackSync(p) {
   syncState = 'syncing'; updateSyncDot();
   try { await p; syncState = 'idle'; }
-  catch (e) { syncState = 'error'; }
+  catch (e) { syncState = 'error'; console.error('[fin-plan] Firestore write failed:', e); }
   updateSyncDot();
 }
 
@@ -227,36 +227,54 @@ function resetAll() {
   ops.push((b) => b.set(userDoc(), settingsPayload()));
   trackSync(runChunked(ops));
 }
-// One-time upgrade: legacy single-blob doc { payload } → per-entity docs.
-async function migrateRemoteIfNeeded() {
+// Writes every in-memory entity to Firestore (used to seed an empty cloud and
+// for the legacy-blob upgrade). Does NOT delete anything.
+function uploadOps(src) {
+  const ops = [];
+  for (const id of Object.keys(src.loans || {})) ops.push((b) => b.set(loanDoc(id), src.loans[id]));
+  for (const id of Object.keys(src.savings || {})) ops.push((b) => b.set(savDoc(id), src.savings[id]));
+  for (const sp of src.spends || []) { const { id: _o, ...rest } = sp; ops.push((b) => b.set(spendDoc(sp.id), rest)); }
+  ops.push((b) => b.set(userDoc(), {
+    income: src.income || 0,
+    budget: src.budget || 0,
+    onboarded: !!src.onboarded,
+    cursor: src.cursor || 0,
+    startAbs: src.startAbs,
+    loanOrder: src.loanOrder || [],
+    savingsOrder: src.savingsOrder || [],
+    history: src.history || [],
+    catBudgets: src.catBudgets || {},
+    schema: SCHEMA,
+    payload: deleteField(),
+    updatedAt: serverTimestamp(),
+  }, { merge: true }));
+  return ops;
+}
+
+// Run once after sign-in, BEFORE attaching listeners:
+//  - legacy single-blob doc { payload } → per-entity docs
+//  - cloud has no doc yet (e.g. database just created) but this device has local
+//    data → push it up, so the empty-collection snapshots don't wipe it
+async function prepareRemote() {
   if (!canWrite()) return;
-  try {
-    const snap = await getDoc(userDoc());
-    const d = snap.exists() ? snap.data() : null;
-    if (!d || !d.payload || d.schema === SCHEMA) return;
+  let snap;
+  try { snap = await getDoc(userDoc()); }
+  catch (e) { console.error('[fin-plan] Firestore read failed (is the database created?):', e); return; }
+  const d = snap.exists() ? snap.data() : null;
+
+  if (d && d.payload && d.schema !== SCHEMA) {
     const parsed = migrate(JSON.parse(d.payload));
-    const ops = [];
-    for (const id of Object.keys(parsed.loans || {})) ops.push((b) => b.set(loanDoc(id), parsed.loans[id]));
-    for (const id of Object.keys(parsed.savings || {})) ops.push((b) => b.set(savDoc(id), parsed.savings[id]));
-    for (const sp of parsed.spends || []) { const { id: _o, ...rest } = sp; ops.push((b) => b.set(spendDoc(sp.id), rest)); }
-    ops.push((b) => b.set(userDoc(), {
-      income: parsed.income || 0,
-      budget: parsed.budget || 0,
-      onboarded: !!parsed.onboarded,
-      cursor: parsed.cursor || 0,
-      startAbs: parsed.startAbs,
-      loanOrder: parsed.loanOrder || [],
-      savingsOrder: parsed.savingsOrder || [],
-      history: parsed.history || [],
-      schema: SCHEMA,
-      payload: deleteField(),
-      updatedAt: serverTimestamp(),
-    }, { merge: true }));
-    await runChunked(ops);
-    S = parsed;
-    persistLocal();
-    reconcile();
-  } catch (e) {}
+    try { await runChunked(uploadOps(parsed)); S = parsed; persistLocal(); reconcile(); }
+    catch (e) { console.error('[fin-plan] legacy migration failed:', e); }
+    return;
+  }
+
+  if (!d) {
+    const hasLocal = S.onboarded || S.loanOrder.length || S.savingsOrder.length || S.spends.length || S.income || S.budget;
+    if (!hasLocal) return;
+    try { await runChunked(uploadOps(S)); persistLocal(); }
+    catch (e) { console.error('[fin-plan] initial cloud seed failed:', e); }
+  }
 }
 
 // ── Real-time listeners ───────────────────────────────────────────────────────
@@ -267,7 +285,7 @@ function attachListeners() {
   unsubs.push(onSnapshot(userDoc(), (snap) => {
     const d = snap.data();
     if (!d) return;
-    // Legacy single-blob doc — ignore until migrateRemoteIfNeeded() converts it,
+    // Legacy single-blob doc — ignore until prepareRemote() converts it,
     // otherwise we'd wipe the view to empty before the real fields are written.
     if (d.payload && d.schema !== SCHEMA) return;
     S.income = d.income || 0;
@@ -500,8 +518,11 @@ function renderContent() {
 function updateSyncDot() {
   const dot = document.getElementById('syncDot');
   if (!dot) return;
-  dot.className = 'sync-dot' + (syncState === 'syncing' ? ' syncing' : '');
-  dot.title = syncState === 'idle' ? 'Synced' : syncState === 'syncing' ? 'Saving…' : 'Sync error';
+  dot.className = 'sync-dot' + (syncState === 'syncing' ? ' syncing' : syncState === 'error' ? ' error' : '');
+  dot.title = syncState === 'idle' ? 'Synced to cloud' : syncState === 'syncing' ? 'Saving…' : 'Not synced — tap for help';
+  dot.onclick = syncState === 'error'
+    ? () => alert('Your changes are saved on this device but could NOT be saved to the cloud.\n\nMost likely the Cloud Firestore database has not been created yet. See the console for the exact error.')
+    : null;
 }
 
 // ── Overview tab ──────────────────────────────────────────────────────────────
@@ -1311,11 +1332,16 @@ function exportData() {
 
 // ── Boot ───────────────────────────────────────────────────────────────────
 let booted = false;
-function go() {
-  if (!currentUser) { view = 'login'; renderLogin(); return; }
+// Render the app view from current state. Assumes a signed-in user — used by the
+// optimistic boot (before auth resolves) and after auth confirms.
+function renderView() {
   if (!S.onboarded) { view = 'onboarding'; renderOnboarding(); }
   else { view = 'shell'; renderShell(); }
   booted = true;
+}
+function go() {
+  if (!currentUser) { view = 'login'; renderLogin(); return; }
+  renderView();
 }
 
 if (!configured) {
@@ -1328,12 +1354,12 @@ if (!configured) {
   if (cachedUid) {
     const saved = migrate(loadLocal());
     if (saved) S = saved;
-    go();
+    renderView(); // believe the cached session; auth confirms below
   } else {
     appEl.innerHTML = `<div style="text-align:center;padding:80px 0;color:var(--faint);font-size:13px">Loading…</div>`;
   }
 
-  onAuthStateChanged(auth, (user) => {
+  onAuthStateChanged(auth, async (user) => {
     currentUser = user;
     if (!user) {
       detachListeners();
@@ -1348,11 +1374,12 @@ if (!configured) {
       try { localStorage.removeItem(KEY); } catch (e) {}
       S = defaults(); booted = false;
     }
-    // Render immediately — never block on the network. Real-time listeners fire
-    // from the local cache near-instantly and reconcile the view; the one-time
-    // legacy migration runs in the background.
+    // Render immediately from cache — never block on the network.
     if (!booted) go();
+    // Reconcile cloud state (migrate legacy / seed empty cloud) BEFORE attaching
+    // listeners, so empty-collection snapshots can't wipe local-only data. The UI
+    // is already visible above, so even if this is slow nothing blocks.
+    await prepareRemote();
     attachListeners();
-    migrateRemoteIfNeeded();
   });
 }

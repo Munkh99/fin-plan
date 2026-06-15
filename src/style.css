@@ -162,6 +162,7 @@ select.set-input{appearance:auto;-webkit-appearance:auto;cursor:pointer}
 .user-bar .info .email{font-size:11px;color:var(--soft);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sync-dot{width:7px;height:7px;border-radius:50%;background:var(--emerald);flex-shrink:0}
 .sync-dot.syncing{background:var(--burnt);animation:pulse 1s infinite}
+.sync-dot.error{background:var(--danger);cursor:pointer;width:9px;height:9px}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 
 .iconbtn{background:var(--card);width:36px;height:36px;border-radius:10px;box-shadow:var(--shadow);font-size:16px;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer}
