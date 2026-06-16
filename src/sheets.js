@@ -26,27 +26,16 @@ import { signInWithPopup, signInWithRedirect, signOut } from 'firebase/auth';
 // contribution moves cash → savings).
 function accountSelectHTML(id, selId, label = 'From account (optional)') {
   if (!S.accountOrder.length) return '';
-  const chips = S.accountOrder.map((aid) => {
+  const opts = S.accountOrder.map((aid) => {
     const a = S.accounts[aid];
-    return a ? `<button class="acct-pick${selId === aid ? ' sel' : ''}" data-aid="${esc(aid)}" type="button">${esc(acctIcon(a.type))} ${esc(a.name)}</button>` : '';
+    return a ? `<option value="${esc(aid)}"${selId === aid ? ' selected' : ''}>${esc(acctIcon(a.type))} ${esc(a.name)}</option>` : '';
   }).join('');
   return `<label class="set-label">${label}</label>
-    <div class="acct-picks" id="${id}_picks">${chips}</div>
-    <input type="hidden" id="${id}" value="${selId ? esc(selId) : ''}">`;
+    <select class="set-input" id="${id}"><option value="">— None —</option>${opts}</select>`;
 }
 const accountVal = (id) => { const el = document.getElementById(id); return el ? (el.value || '') : ''; };
-function wireAccountField(id) {
-  const hidden = document.getElementById(id);
-  if (!hidden) return;
-  document.querySelectorAll(`#${id}_picks .acct-pick`).forEach((btn) => {
-    btn.onclick = () => {
-      const already = btn.classList.contains('sel');
-      document.querySelectorAll(`#${id}_picks .acct-pick`).forEach((b) => b.classList.remove('sel'));
-      if (!already) { btn.classList.add('sel'); hidden.value = btn.dataset.aid; }
-      else hidden.value = '';
-    };
-  });
-}
+// Native <select> needs no JS wiring; kept so existing call sites stay unchanged.
+function wireAccountField(id) {}
 const dateBtnLabel = (ds) => new Date(ds + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
 // Wire a date button (id+'_btn') + hidden input (id) to the themed calendar.
@@ -662,10 +651,9 @@ export function openAccountForm(editId, onDone) {
     <label class="set-label">Current balance (${esc(CUR.symbol)})</label>
     <input class="set-input mono" id="ac_bal" inputmode="numeric" placeholder="0" value="${ex ? Math.round(ex.balance).toLocaleString('en-US') : ''}">
     <label class="set-label">Type</label>
-    <div class="acct-picks" id="ac_type_picks">
-      ${ACCOUNT_TYPES.map((t) => `<button class="acct-pick${selType === t.id ? ' sel' : ''}" data-tid="${esc(t.id)}" type="button">${t.icon} ${t.label}</button>`).join('')}
-    </div>
-    <input type="hidden" id="ac_type" value="${selType}">
+    <select class="set-input" id="ac_type">
+      ${ACCOUNT_TYPES.map((t) => `<option value="${esc(t.id)}"${selType === t.id ? ' selected' : ''}>${t.icon} ${t.label}</option>`).join('')}
+    </select>
     <label class="set-label">Color</label>
     <div class="color-row" id="ac_colors">${PALETTE.map((p) => `<button class="swatch${p === selColor ? ' sel' : ''}" data-color="${p}" style="background:${p}" aria-label="Pick color"></button>`).join('')}</div>
     <div class="btnrow">
@@ -673,9 +661,6 @@ export function openAccountForm(editId, onDone) {
       <button class="primary" id="ac_save">${ex ? 'Save changes' : 'Add account'}</button>
     </div></div>`;
   scrim.classList.add('open');
-  scrim.querySelectorAll('#ac_type_picks .acct-pick').forEach((btn) => {
-    btn.onclick = () => { selType = btn.dataset.tid; document.getElementById('ac_type').value = selType; scrim.querySelectorAll('#ac_type_picks .acct-pick').forEach((b) => b.classList.toggle('sel', b === btn)); };
-  });
   scrim.querySelectorAll('#ac_colors .swatch').forEach((b) => (b.onclick = () => { selColor = b.dataset.color; scrim.querySelectorAll('#ac_colors .swatch').forEach((x) => x.classList.toggle('sel', x === b)); }));
   // closeSheet() first so onDone can repaint the screen behind (the Accounts tab,
   // onboarding, or overview) cleanly.

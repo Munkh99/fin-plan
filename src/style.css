@@ -152,10 +152,6 @@ button{font-family:inherit;cursor:pointer;border:none}
 .set-input{width:100%;border:1px solid var(--rule);background:var(--card);border-radius:10px;padding:10px 12px;font-family:'IBM Plex Mono',monospace;font-size:14px;color:var(--ink);margin-top:3px;outline:none;-webkit-appearance:none}
 .set-input:focus{border-color:var(--ink)}
 select.set-input{appearance:auto;-webkit-appearance:auto;cursor:pointer}
-.acct-picks{display:flex;flex-wrap:wrap;gap:6px;margin-top:5px}
-.acct-pick{border:1px solid var(--rule);background:var(--card);color:var(--ink);border-radius:10px;padding:7px 11px;font-family:'IBM Plex Mono',monospace;font-size:13px;cursor:pointer;transition:all .12s}
-.acct-pick.sel{background:var(--ink);color:#fff;border-color:var(--ink)}
-[data-theme="dark"] .acct-pick.sel{background:#3A4150;border-color:#3A4150}
 .two{display:grid;grid-template-columns:1fr 1fr;gap:9px}
 .divider{height:1px;background:var(--rule);margin:14px 0}
 .row-space{display:flex;justify-content:space-between;align-items:center}
