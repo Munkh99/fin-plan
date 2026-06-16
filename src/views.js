@@ -14,8 +14,8 @@ import {
 import { currentUser, syncState } from './store.js';
 import { appEl, V, toast, alertDialog } from './dom.js';
 import {
-  openAddSpend, openEditSpend, openLoanForm, openSavingsForm, openLoanDetail,
-  openSavDetail, openSettings, openAccounts, openAccountForm,
+  openAddSpend, openEditSpend, openLoanForm, openLoanDetail,
+  openSavDetail, openSettings, openAccountForm, openAddBalance,
   renderOnboarding, renderLogin,
 } from './sheets.js';
 
@@ -40,8 +40,8 @@ export function renderShell() {
       <button class="tab-btn${V.activeTab === 'loans' ? ' active' : ''}" data-tab="loans">
         <span class="tab-icon">🏦</span>Loans
       </button>
-      <button class="tab-btn${V.activeTab === 'savings' ? ' active' : ''}" data-tab="savings">
-        <span class="tab-icon">💰</span>Savings
+      <button class="tab-btn${V.activeTab === 'accounts' ? ' active' : ''}" data-tab="accounts">
+        <span class="tab-icon">💰</span>Accounts
       </button>
     </nav>
     <button class="fab" id="fab" title="Add spending" aria-label="Add spending">＋</button>`;
@@ -66,7 +66,7 @@ function updateFab() {
     overview: { t: 'Add spending', fn: () => openAddSpend() },
     spending: { t: 'Add spending', fn: () => openAddSpend() },
     loans:    { t: 'Add loan',     fn: () => openLoanForm(null, renderContent) },
-    savings:  { t: 'Add savings goal', fn: () => openSavingsForm(null, renderContent) },
+    accounts: { t: 'Add account or goal', fn: () => openAddBalance() },
   };
   const m = map[V.activeTab] || map.overview;
   fab.title = m.t;
@@ -94,7 +94,7 @@ export function renderContent() {
   if (V.activeTab === 'overview') renderOverview(el);
   else if (V.activeTab === 'spending') renderSpending(el);
   else if (V.activeTab === 'loans') renderLoans(el);
-  else if (V.activeTab === 'savings') renderSavingsTab(el);
+  else if (V.activeTab === 'accounts') renderAccountsTab(el);
 }
 
 export function updateSyncDot() {
@@ -235,9 +235,9 @@ function renderOverview(el) {
   const goL = document.getElementById('goLoans');
   const goS = document.getElementById('goSavings');
   if (goL) goL.onclick = () => { V.activeTab = 'loans'; renderShell(); };
-  if (goS) goS.onclick = () => { V.activeTab = 'savings'; renderShell(); };
+  if (goS) goS.onclick = () => { V.activeTab = 'accounts'; renderShell(); };
   const goA = document.getElementById('goAccounts');
-  if (goA) goA.onclick = () => openAccounts();
+  if (goA) goA.onclick = () => { V.activeTab = 'accounts'; renderShell(); };
   const addA = document.getElementById('addAccount');
   if (addA) addA.onclick = () => openAccountForm(null, renderContent);
 }
@@ -420,19 +420,37 @@ function renderLoans(el) {
   el.querySelectorAll('[data-loan]').forEach((e) => (e.onclick = () => openLoanDetail(e.dataset.loan)));
 }
 
-// ── Savings tab ───────────────────────────────────────────────────────────────
-function renderSavingsTab(el) {
-  const totalSaved = S.savingsOrder.reduce((s, id) => s + (S.savings[id] ? S.savings[id].current : 0), 0);
-  const totalTarget = S.savingsOrder.reduce((s, id) => s + (S.savings[id] ? S.savings[id].target : 0), 0);
-  let h = `<div class="seclabel"><div class="t">Savings goals</div></div>`;
+// ── Accounts tab (liquid accounts + savings goals) ─────────────────────────────
+function renderAccountsTab(el) {
+  const liquid = totalAccounts();
+  const saved = totalSaved();
+  let h = `<div class="hero" style="margin-bottom:12px">
+    <div class="eyebrow">Total balance</div>
+    <div style="font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:32px;color:#fff;margin-top:4px">${fmt(liquid + saved)}</div>
+    <div style="font-size:12px;color:#9aa0ad;margin-top:4px">Accounts <b style="color:#7BE3C0">${fmtShort(liquid)}</b> · Goals <b style="color:#7BE3C0">${fmtShort(saved)}</b></div>
+  </div>`;
+
+  // ── Accounts (where money sits) ──
+  h += `<div class="seclabel"><div class="t">Accounts</div></div>`;
+  if (!S.accountOrder.length) {
+    h += `<div class="empty">No accounts yet.<br>Tap ＋ to add a bank, cash or e-wallet balance.</div>`;
+  } else {
+    for (const id of S.accountOrder) {
+      const a = S.accounts[id]; if (!a) continue;
+      h += `<div class="loan" style="--ac:${ac(id)}" data-acc="${esc(id)}">
+        <div class="top">
+          <div class="name"><span class="ai" style="background:${ac(id)}22">${esc(acctIcon(a.type))}</span>${esc(a.name)}</div>
+          <div class="bal mono"${a.balance < 0 ? ' style="color:var(--danger)"' : ''}>${fmt(a.balance)}</div>
+        </div>
+      </div>`;
+    }
+  }
+
+  // ── Savings goals (money set aside toward a target) ──
+  h += `<div class="seclabel" style="margin-top:18px"><div class="t">Savings goals</div></div>`;
   if (!S.savingsOrder.length) {
     h += `<div class="empty">No savings goals yet.<br>Tap ＋ to create one.</div>`;
   } else {
-    h += `<div class="hero" style="margin-bottom:12px">
-      <div class="eyebrow">Total saved</div>
-      <div style="font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:32px;color:#fff;margin-top:4px">${fmt(totalSaved)}</div>
-      ${totalTarget > 0 ? `<div style="font-size:12px;color:#9aa0ad;margin-top:4px">toward <b style="color:#7BE3C0">${fmt(totalTarget)}</b> in goals</div>` : ''}
-    </div>`;
     for (const id of S.savingsOrder) {
       const sv = S.savings[id]; if (!sv) continue;
       const done = sv.current >= sv.target;
@@ -456,7 +474,9 @@ function renderSavingsTab(el) {
       </div>`;
     }
   }
+
   el.innerHTML = h;
+  el.querySelectorAll('[data-acc]').forEach((e) => (e.onclick = () => openAccountForm(e.dataset.acc, renderContent)));
   el.querySelectorAll('[data-sav]').forEach((e) => (e.onclick = () => openSavDetail(e.dataset.sav)));
 }
 

@@ -11,7 +11,16 @@ npm run build    # production build
 ```
 
 ## Deploy
-Push to `main` → GitHub Actions deploys to Firebase Hosting (needs the `FIREBASE_SERVICE_ACCOUNT` repo secret). Security rules: `firebase deploy --only firestore:rules`.
+
+**Automatic:** push to `main` → GitHub Actions deploys to Firebase Hosting (needs the `FIREBASE_SERVICE_ACCOUNT` repo secret).
+
+**Manual (from your machine):**
+```
+npm install -g firebase-tools   # one-time: install the CLI
+firebase login                  # one-time: sign in as the project owner
+npm run deploy                  # build, then deploy hosting + firestore rules
+```
+`npm run deploy` runs `vite build && firebase deploy` — the build is required, since `firebase deploy` only uploads what's in `dist/`. Scope it with `firebase deploy --only hosting` or `--only firestore:rules` if needed.
 
 One-time Firebase setup: add the hosting domain under Auth → Settings → Authorized domains.
 

@@ -3,11 +3,11 @@
 // back into views.js (renderContent / renderShell) to refresh the underlying
 // screen — the cycle resolves at runtime.
 
-import { esc, CURRENCIES, APP_VERSION, PALETTE, ACCOUNT_TYPES, ACCOUNT_TYPE_MAP } from './constants.js';
+import { esc, CURRENCIES, APP_VERSION, PALETTE, ACCOUNT_TYPES } from './constants.js';
 import {
   S, fmt, fmtShort, allCats, catOf, CUR, todayStr, dateStrFromTs, ord, lc, sc, ac, acctIcon,
   monthLabel, nowAbs, simulateLoans, plannedLoans, cloneLoans,
-  getInt, nextColor, savMonthsToGoal, savMonthlyInterest, payoffMonths, totalAccounts, adjustAccount, applyCurrency,
+  getInt, nextColor, savMonthsToGoal, savMonthlyInterest, payoffMonths, adjustAccount, applyCurrency,
 } from './state.js';
 import {
   persistSpend, persistSpendDelete, persistLoan, persistSav, addLoan, addSav,
@@ -535,29 +535,23 @@ export function openCategories() {
   document.getElementById('cc_done').onclick = () => { saveBudgets(); persistSettings(); openSettings(); };
 }
 
-// ── Accounts manager (liquid money) ─────────────────────────────────────────────
-export function openAccounts() {
-  const list = S.accountOrder.map((id) => {
-    const a = S.accounts[id]; if (!a) return '';
-    const t = ACCOUNT_TYPE_MAP[a.type] || ACCOUNT_TYPE_MAP.bank;
-    return `<div class="spend-item" data-acc="${esc(id)}">
-      <div class="cat-icon" style="background:${ac(id)}22">${esc(acctIcon(a.type))}</div>
-      <div class="info"><div class="name">${esc(a.name)}</div><div class="meta">${esc(t.label)}</div></div>
-      <div class="amt"${a.balance < 0 ? ' style="color:var(--danger)"' : ''}>${fmt(a.balance)}</div>
-    </div>`;
-  }).join('');
+// ── Add to Accounts chooser (FAB on the Accounts tab) ──────────────────────────
+// Asks what kind of thing to add: a plain account (where money sits) or a
+// savings goal (a target you fund, with optional interest).
+export function openAddBalance() {
   scrim.innerHTML = `<div class="sheet">
-    <h2>Accounts</h2>
-    <div class="hint">Cash, bank and e-wallet balances. These count toward your net worth on the Overview (debt is tracked separately as loans).</div>
-    ${S.accountOrder.length ? `<div class="row-space" style="margin-bottom:10px;font-size:13px"><span style="color:var(--soft)">Total liquid</span><b class="mono">${fmt(totalAccounts())}</b></div>` : ''}
-    ${list || '<div class="empty" style="padding:14px 0">No accounts yet.</div>'}
-    <button class="ghost" id="acc_add" style="width:100%;margin-top:6px">＋ Add account</button>
-    <div class="btnrow"><button class="primary" id="acc_close">Done</button></div>
+    <h2>Add</h2>
+    <div class="hint">What would you like to add to Accounts?</div>
+    <button class="ghost ab-opt" id="ab_acct">🏦 Account
+      <span>Bank, cash or e-wallet balance</span></button>
+    <button class="ghost ab-opt" id="ab_goal">🎯 Savings goal
+      <span>A target you save toward, with optional interest</span></button>
+    <div class="btnrow"><button class="ghost" id="ab_cancel">Cancel</button></div>
   </div>`;
   scrim.classList.add('open');
-  document.getElementById('acc_close').onclick = () => { closeSheet(); renderContent(); };
-  document.getElementById('acc_add').onclick = () => openAccountForm(null, openAccounts);
-  scrim.querySelectorAll('[data-acc]').forEach((el) => (el.onclick = () => openAccountForm(el.dataset.acc, openAccounts)));
+  document.getElementById('ab_cancel').onclick = closeSheet;
+  document.getElementById('ab_acct').onclick = () => openAccountForm(null, renderContent);
+  document.getElementById('ab_goal').onclick = () => openSavingsForm(null, renderContent);
 }
 
 export function openAccountForm(editId, onDone) {
@@ -582,8 +576,8 @@ export function openAccountForm(editId, onDone) {
     </div></div>`;
   scrim.classList.add('open');
   scrim.querySelectorAll('#ac_colors .swatch').forEach((b) => (b.onclick = () => { selColor = b.dataset.color; scrim.querySelectorAll('#ac_colors .swatch').forEach((x) => x.classList.toggle('sel', x === b)); }));
-  // closeSheet() first so onDone can repaint the screen behind (onboarding/overview)
-  // or re-open the manager (openAccounts) cleanly.
+  // closeSheet() first so onDone can repaint the screen behind (the Accounts tab,
+  // onboarding, or overview) cleanly.
   const cancel = document.getElementById('ac_cancel'); if (cancel) cancel.onclick = () => { closeSheet(); if (onDone) onDone(); };
   const del = document.getElementById('ac_del');
   if (del) del.onclick = async () => {
@@ -630,7 +624,6 @@ export function openSettings() {
   <select class="set-input" id="s_currency">${CURRENCIES.map((c) => `<option value="${c.code}"${S.currency === c.code ? ' selected' : ''}>${c.code} (${c.symbol})</option>`).join('')}</select>
   <div class="divider"></div>
   <div class="btnrow" style="margin-top:0">
-    <button class="ghost" id="acctsBtn">🏦 Accounts</button>
     <button class="ghost" id="catsBtn">🏷 Categories</button>
   </div>
   <div class="divider"></div>
@@ -656,7 +649,6 @@ export function openSettings() {
     themeToggle.classList.toggle('on', next === 'dark');
     themeToggle.setAttribute('aria-checked', next === 'dark');
   };
-  document.getElementById('acctsBtn').onclick = openAccounts;
   document.getElementById('catsBtn').onclick = openCategories;
   document.getElementById('resetBtn').onclick = async () => { if (await confirmDialog('Erase everything? This cannot be undone.', { okText: 'Erase', danger: true })) { resetAll(); closeSheet(); V.view = 'onboarding'; renderOnboarding(); } };
   const gi = (id) => parseInt((document.getElementById(id).value || '').replace(/[^\d]/g, '')) || 0;
