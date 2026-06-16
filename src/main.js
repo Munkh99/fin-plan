@@ -1220,10 +1220,6 @@ function openSettings() {
   <input class="set-input mono" id="s_budget" inputmode="numeric" placeholder="0" value="${S.budget ? S.budget.toLocaleString('en-US') : ''}">
   <div style="font-size:11px;color:var(--soft);margin:4px 0 2px">How much you aim to spend on everyday living each month (food, transport, fun…). Loan payments and savings are tracked separately. The Overview compares your actual spending against this.</div>
   <div class="divider"></div>
-  <div style="font-family:'Bricolage Grotesque',sans-serif;font-weight:700;margin-bottom:4px">Category budgets <span style="font-weight:400;font-size:11px;color:var(--soft)">(optional)</span></div>
-  <div style="font-size:11px;color:var(--soft);margin-bottom:10px">Split the budget above into per-category limits. You'll see a ⚠ when you go over one.</div>
-  ${CATEGORIES.map((c) => `<div class="catbud-row"><span class="lbl">${c.icon} ${c.label}</span><input class="set-input mono" id="cb_${c.id}" inputmode="numeric" placeholder="—" value="${S.catBudgets[c.id] ? S.catBudgets[c.id].toLocaleString('en-US') : ''}"></div>`).join('')}
-  <div class="divider"></div>
   <div class="row-space" style="margin-bottom:4px">
     <span style="font-family:'Bricolage Grotesque',sans-serif;font-weight:700">Dark mode</span>
     <button class="toggle${getTheme() === 'dark' ? ' on' : ''}" id="themeToggle" role="switch" aria-checked="${getTheme() === 'dark'}"><span class="knob"></span></button>
@@ -1254,9 +1250,6 @@ function openSettings() {
   const gi = (id) => parseInt((document.getElementById(id).value || '').replace(/[^\d]/g, '')) || 0;
   document.getElementById('saveSet').onclick = () => {
     S.income = gi('s_income'); S.budget = gi('s_budget');
-    const cb = {};
-    for (const c of CATEGORIES) { const v = gi('cb_' + c.id); if (v > 0) cb[c.id] = v; }
-    S.catBudgets = cb;
     persistSettings(); closeSheet(); renderContent(); toast('Settings saved');
   };
 }

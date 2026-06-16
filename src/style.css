@@ -113,7 +113,7 @@ body{background:var(--paper)}
 .sav-card .name{font-family:'Bricolage Grotesque',sans-serif;font-weight:700;font-size:15px;display:flex;align-items:center;gap:8px}
 
 /* ── Sheets ── */
-.scrim{position:fixed;inset:0;background:rgba(20,22,30,.5);backdrop-filter:blur(2px);display:none;align-items:flex-end;justify-content:center;z-index:50}
+.scrim{position:fixed;inset:0;background:rgba(20,22,30,.5);backdrop-filter:blur(2px);display:none;align-items:flex-end;justify-content:center;z-index:50;color:var(--ink)}
 .scrim.open{display:flex}
 .sheet{background:var(--paper);width:100%;max-width:480px;border-radius:22px 22px 0 0;padding:20px 18px calc(20px + env(safe-area-inset-bottom));max-height:92vh;overflow-y:auto;animation:rise .28s cubic-bezier(.22,1,.36,1)}
 @keyframes rise{from{transform:translateY(40px);opacity:.4}to{transform:translateY(0);opacity:1}}
@@ -192,7 +192,7 @@ select.set-input{appearance:auto;-webkit-appearance:auto;cursor:pointer}
 .toggle.on .knob{transform:translateX(19px)}
 
 /* ── Modal dialog ── */
-.modal-scrim{position:fixed;inset:0;background:rgba(20,22,30,.45);display:none;align-items:center;justify-content:center;z-index:70;padding:24px}
+.modal-scrim{position:fixed;inset:0;background:rgba(20,22,30,.45);display:none;align-items:center;justify-content:center;z-index:70;padding:24px;color:var(--ink)}
 .modal-scrim.open{display:flex}
 .modal-box{background:var(--card);border-radius:16px;padding:20px;max-width:340px;width:100%;box-shadow:0 12px 40px rgba(20,22,30,.4)}
 .modal-box .modal-msg{font-size:14px;line-height:1.5;color:var(--ink);margin-bottom:16px;white-space:pre-line}
