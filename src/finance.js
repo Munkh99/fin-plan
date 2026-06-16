@@ -72,6 +72,16 @@ export function simulateLoans(S) {
   return { snaps, months: guard, totalInt, payoffAbs: S.startAbs + S.cursor + Math.max(0, guard - 1) };
 }
 
+// Months to pay a single balance off at a fixed monthly payment (compounding at
+// `rate`/month). Returns Infinity if the payment never beats the interest.
+export function payoffMonths(bal, rate, monthly) {
+  if (bal <= 0.5) return 0;
+  if (monthly <= bal * rate) return Infinity;
+  let m = 0, b = bal;
+  while (b > 0.5 && m < 1200) { b = b * (1 + rate) - monthly; m++; }
+  return m;
+}
+
 export function savMonthsToGoal(S, id) {
   const sv = S.savings[id];
   if (!sv) return null;

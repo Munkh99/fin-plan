@@ -143,6 +143,7 @@ export const freeCash = () => F.freeCash(S);
 // (no global month cursor), so the projection always starts "this month".
 export const simulateLoans = () => F.simulateLoans({ ...S, cursor: Math.max(0, nowAbs() - S.startAbs) });
 export const savMonthsToGoal = (id) => F.savMonthsToGoal(S, id);
+export const payoffMonths = (bal, rate, monthly) => F.payoffMonths(bal, rate, monthly);
 
 // Totals across the entity collections. Net worth = liquid accounts + money set
 // aside in savings goals − outstanding loan balances.
@@ -150,6 +151,25 @@ export const totalAccounts = () => S.accountOrder.reduce((s, id) => s + (S.accou
 export const totalSaved = () => S.savingsOrder.reduce((s, id) => s + (S.savings[id] ? S.savings[id].current : 0), 0);
 export const totalDebt = () => S.loanOrder.reduce((s, id) => s + (S.loans[id] ? S.loans[id].bal : 0), 0);
 export const netWorth = () => totalAccounts() + totalSaved() - totalDebt();
+
+// Move money in/out of a liquid account (negative delta = money leaving). Used
+// when a spend, loan payment or savings contribution draws from an account, so
+// net worth stays consistent. Caller is responsible for persisting the account.
+export function adjustAccount(id, delta) {
+  if (!id) return;
+  const a = S.accounts[id];
+  if (a) a.balance = (a.balance || 0) + delta;
+}
+
+// ── Spending insights ───────────────────────────────────────────────────────
+export const prevMonthSpend = () => totalForMonth(prevMonth(nowMonth()));
+// Average spend over the previous `n` completed months (excludes the partial
+// current month).
+export function avgPrevSpend(n = 3) {
+  let ym = prevMonth(nowMonth()), sum = 0;
+  for (let i = 0; i < n; i++) { sum += totalForMonth(ym); ym = prevMonth(ym); }
+  return n ? sum / n : 0;
+}
 
 // ── Spending helpers ──────────────────────────────────────────────────────────
 export function spendsForMonth(ym) { return S.spends.filter((sp) => sp.month === ym); }
@@ -167,7 +187,11 @@ export function lastMonthsTotals(n) {
   return arr;
 }
 
-// Recurring templates not yet added to the given month.
+// Recurring templates not yet added to the given month. Expenses are detected by
+// their spend tag (idempotent); income credits an account so it has no spend —
+// it's tracked by the months listed in r.applied.
 export function pendingRecurring(ym) {
-  return (S.recurring || []).filter((r) => !S.spends.some((sp) => sp.month === ym && sp.rec === r.id));
+  return (S.recurring || []).filter((r) => r.type === 'income'
+    ? !((r.applied || []).includes(ym))
+    : !S.spends.some((sp) => sp.month === ym && sp.rec === r.id));
 }

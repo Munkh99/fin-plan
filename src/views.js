@@ -9,9 +9,9 @@ import {
   lc, sc, ac, acctIcon, ord, prevMonth, nextMonthStr,
   simulateLoans, plannedLoans, cloneLoans, freeCash, totalSavingsContrib,
   byCategory, totalForMonth, spendsForMonth, lastMonthsTotals, savMonthsToGoal,
-  totalAccounts, pendingRecurring, daysInMonth, applyCurrency, persistLocal,
+  totalAccounts, avgPrevSpend, pendingRecurring, daysInMonth, adjustAccount, applyCurrency, persistLocal,
 } from './state.js';
-import { currentUser, syncState, persistSpend } from './store.js';
+import { currentUser, syncState, persistSpend, persistAcc, persistSettings } from './store.js';
 import { appEl, V, toast, alertDialog } from './dom.js';
 import {
   openAddSpend, openEditSpend, openLoanForm, openSavingsForm, openLoanDetail,
@@ -82,7 +82,10 @@ function renderTopbarRight() {
   } else {
     el.innerHTML = `<button class="iconbtn" id="settingsBtn" aria-label="Settings">⚙</button>`;
   }
-  document.getElementById('settingsBtn').onclick = openSettings;
+  const btn = document.getElementById('settingsBtn');
+  btn.onclick = openSettings;
+  // The avatar is an <img role="button"> — give it keyboard activation too.
+  btn.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openSettings(); } };
 }
 
 export function renderContent() {
@@ -117,6 +120,7 @@ function renderOverview(el) {
   const totalDebt = S.loanOrder.reduce((s, id) => s + (S.loans[id] ? S.loans[id].bal : 0), 0);
   const totalSaved = S.savingsOrder.reduce((s, id) => s + (S.savings[id] ? S.savings[id].current : 0), 0);
   const liquid = totalAccounts();
+  const avg = avgPrevSpend(3);
   const sim = S.loanOrder.length ? simulateLoans() : null;
   const barColor = pct > 90 ? '#f87171' : pct > 70 ? '#FCD34D' : '#7BE3C0';
   const leftCls = left < 0 ? 'bad' : left < S.budget * 0.1 ? 'warn' : 'good';
@@ -135,7 +139,15 @@ function renderOverview(el) {
       </div>
     </div>
     <div class="bar" style="margin-top:12px"><span style="width:${pct}%;background:${barColor}"></span></div>
+    ${avg > 0 ? `<div style="font-size:10.5px;color:#9aa0ad;margin-top:9px">${spent > avg ? '▲' : '▼'} ${fmtShort(Math.abs(spent - avg))} ${spent > avg ? 'above' : 'below'} your 3-month average (${fmtShort(avg)})</div>` : ''}
   </div>`;
+
+  // Budget alert
+  if (S.budget > 0 && spent > S.budget) {
+    h += `<div class="alert-card bad">⚠ Over budget by ${fmtShort(spent - S.budget)}</div>`;
+  } else if (S.budget > 0 && pct > 85) {
+    h += `<div class="alert-card warn">Approaching budget — ${fmtShort(left)} left</div>`;
+  }
 
   h += recurringBannerHTML(ym);
 
@@ -258,7 +270,56 @@ function trendCard() {
 }
 
 // ── Spending tab ──────────────────────────────────────────────────────────────
+function spendRowHTML(sp) {
+  const c = catOf(sp.category);
+  const note = esc(sp.note);
+  return `<div class="spend-item" data-spend="${esc(sp.id)}">
+    <div class="cat-icon" style="background:${c.color}22">${esc(c.icon)}</div>
+    <div class="info">
+      <div class="name">${note || esc(c.label)}</div>
+      <div class="meta">${esc(c.label)}${sp.note && sp.note !== c.label ? ' · ' + note : ''}</div>
+    </div>
+    <div class="amt">${fmt(sp.amount)}</div>
+  </div>`;
+}
+// Re-render on each keystroke, then restore focus/caret (the input is recreated).
+function wireSearch(el) {
+  const s = el.querySelector('#sp_all');
+  if (!s) return;
+  s.oninput = () => {
+    V.spendQuery = s.value;
+    renderContent();
+    const n = document.getElementById('sp_all');
+    if (n) { n.focus(); const v = n.value; n.setSelectionRange(v.length, v.length); }
+  };
+}
+
 function renderSpending(el) {
+  const q = (V.spendQuery || '').trim().toLowerCase();
+  const searchBox = `<input class="search-input" id="sp_all" placeholder="🔍 Search all spending…" value="${esc(V.spendQuery || '')}">`;
+
+  // All-time search results across every month.
+  if (q) {
+    const matches = S.spends
+      .filter((sp) => ((sp.note || '') + ' ' + catOf(sp.category).label).toLowerCase().includes(q))
+      .sort((a, b) => b.ts - a.ts);
+    const total = matches.reduce((s, sp) => s + sp.amount, 0);
+    let h = searchBox + `<div class="seclabel"><div class="t">${matches.length} result${matches.length === 1 ? '' : 's'}</div><div class="m">${fmt(total)}</div></div>`;
+    if (!matches.length) h += `<div class="empty">No matches across your spending.</div>`;
+    const byMonth = {};
+    for (const sp of matches) (byMonth[sp.month] = byMonth[sp.month] || []).push(sp);
+    for (const m of Object.keys(byMonth).sort().reverse()) {
+      h += `<div class="day-group"><div class="day-label">${monthDisplay(m)}</div>`;
+      for (const sp of byMonth[m]) h += spendRowHTML(sp);
+      h += `</div>`;
+    }
+    el.innerHTML = h;
+    wireSearch(el);
+    el.querySelectorAll('[data-spend]').forEach((item) => (item.onclick = () => openEditSpend(item.dataset.spend)));
+    return;
+  }
+
+  // Normal current/selected-month view.
   const items = spendsForMonth(V.spendMonth);
   const total = items.reduce((s, sp) => s + sp.amount, 0);
   const cats = byCategory(V.spendMonth);
@@ -271,7 +332,7 @@ function renderSpending(el) {
     (byDay[key] = byDay[key] || []).push(sp);
   }
 
-  let h = `<div class="month-nav">
+  let h = searchBox + `<div class="month-nav">
     <button id="mn_prev">‹</button>
     <div class="label">${monthDisplay(V.spendMonth)}</div>
     <button id="mn_next" ${isNow ? 'style="opacity:.3;pointer-events:none"' : ''}>›</button>
@@ -304,50 +365,22 @@ function renderSpending(el) {
       h += `</div>`;
     }
 
-    if (items.length >= 6) {
-      h += `<input class="search-input" id="sp_search" placeholder="🔍 Search notes or category…">`;
-    }
-
     for (const dayKey of Object.keys(byDay)) {
       const d = new Date(dayKey + 'T12:00:00');
       const todayKey = new Date().toISOString().slice(0, 10);
       const yesterdayKey = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
       const dayLabel = dayKey === todayKey ? 'Today' : dayKey === yesterdayKey ? 'Yesterday' : d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
       h += `<div class="day-group"><div class="day-label">${dayLabel}</div>`;
-      for (const sp of byDay[dayKey]) {
-        const c = catOf(sp.category);
-        const note = esc(sp.note);
-        const hay = esc(((sp.note || '') + ' ' + c.label).toLowerCase());
-        h += `<div class="spend-item" data-spend="${esc(sp.id)}" data-search="${hay}">
-          <div class="cat-icon" style="background:${c.color}22">${esc(c.icon)}</div>
-          <div class="info">
-            <div class="name">${note || esc(c.label)}</div>
-            <div class="meta">${esc(c.label)}${sp.note && sp.note !== c.label ? ' · ' + note : ''}</div>
-          </div>
-          <div class="amt">${fmt(sp.amount)}</div>
-        </div>`;
-      }
+      for (const sp of byDay[dayKey]) h += spendRowHTML(sp);
       h += `</div>`;
     }
   }
 
   el.innerHTML = h;
+  wireSearch(el);
   document.getElementById('mn_prev').onclick = () => { V.spendMonth = prevMonth(V.spendMonth); renderContent(); };
   document.getElementById('mn_next').onclick = () => { V.spendMonth = nextMonthStr(V.spendMonth); renderContent(); };
   el.querySelectorAll('[data-spend]').forEach((item) => (item.onclick = () => openEditSpend(item.dataset.spend)));
-  const search = document.getElementById('sp_search');
-  if (search) search.oninput = () => {
-    const q = search.value.trim().toLowerCase();
-    el.querySelectorAll('[data-spend]').forEach((item) => {
-      const hay = item.getAttribute('data-search') || '';
-      item.style.display = !q || hay.includes(q) ? '' : 'none';
-    });
-    // Hide day headers whose entries are all filtered out.
-    el.querySelectorAll('.day-group').forEach((g) => {
-      const anyVisible = [...g.querySelectorAll('[data-spend]')].some((i) => i.style.display !== 'none');
-      g.style.display = anyVisible ? '' : 'none';
-    });
-  };
   if (isNow) wireRecurringBanner(V.spendMonth);
 }
 
@@ -437,10 +470,14 @@ function renderSavingsTab(el) {
 function recurringBannerHTML(ym) {
   const pend = pendingRecurring(ym);
   if (!pend.length) return '';
-  const sum = pend.reduce((s, r) => s + r.amount, 0);
+  const out = pend.filter((r) => r.type !== 'income').reduce((s, r) => s + r.amount, 0);
+  const inc = pend.filter((r) => r.type === 'income').reduce((s, r) => s + r.amount, 0);
+  const parts = [];
+  if (out) parts.push(`−${fmtShort(out)}`);
+  if (inc) parts.push(`+${fmtShort(inc)}`);
   return `<div class="rec-banner">
     <div><div class="rec-t">🔁 ${pend.length} recurring ${pend.length === 1 ? 'entry' : 'entries'}</div>
-      <div class="rec-s">${fmtShort(sum)} · not added to ${monthDisplay(ym)} yet</div></div>
+      <div class="rec-s">${parts.join(' / ')} · not added to ${monthDisplay(ym)} yet</div></div>
     <button class="rec-add" id="recApply">Add all</button>
   </div>`;
 }
@@ -448,21 +485,30 @@ function wireRecurringBanner(ym) {
   const btn = document.getElementById('recApply');
   if (btn) btn.onclick = () => applyRecurring(ym);
 }
-// Materialises every pending template for the month into ordinary spends tagged
-// rec:<id> (so they stay editable/deletable and the apply is idempotent).
+// Apply every pending template for the month: expenses become ordinary spends
+// tagged rec:<id> (idempotent, editable); income credits its account and marks
+// the month applied. Both optionally move money in/out of a chosen account.
 function applyRecurring(ym) {
   const pend = pendingRecurring(ym);
   if (!pend.length) return;
   const dim = daysInMonth(ym);
   pend.forEach((r, i) => {
+    if (r.type === 'income') {
+      if (r.account) adjustAccount(r.account, r.amount);
+      r.applied = r.applied || []; r.applied.push(ym);
+      return;
+    }
     const day = Math.min(Math.max(1, r.day || 1), dim);
     const id = 'sp_' + Date.now() + '_' + i;
     const ts = new Date(`${ym}-${String(day).padStart(2, '0')}T12:00:00`).getTime();
-    S.spends.push({ id, ts, month: ym, amount: r.amount, category: r.category, note: r.note || '', rec: r.id });
+    S.spends.push({ id, ts, month: ym, amount: r.amount, category: r.category, note: r.note || '', rec: r.id, account: r.account || undefined });
+    if (r.account) adjustAccount(r.account, -r.amount);
     persistSpend(id);
   });
+  [...new Set(pend.map((r) => r.account).filter(Boolean))].forEach((aid) => persistAcc(aid));
+  if (pend.some((r) => r.type === 'income')) persistSettings(); // r.applied lives in settings
   renderContent();
-  toast(`Added ${pend.length} recurring ${pend.length === 1 ? 'entry' : 'entries'}`);
+  toast(`Applied ${pend.length} recurring ${pend.length === 1 ? 'entry' : 'entries'}`);
 }
 
 // ── Render dispatch / boot ────────────────────────────────────────────────────

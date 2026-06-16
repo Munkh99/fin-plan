@@ -242,6 +242,25 @@ select.set-input{appearance:auto;-webkit-appearance:auto;cursor:pointer}
 .swatch{width:28px;height:28px;border-radius:50%;border:2px solid transparent;cursor:pointer;padding:0}
 .swatch.sel{border-color:var(--ink);box-shadow:0 0 0 2px var(--card) inset}
 
+/* ── Loan what-if ── */
+.whatif{background:var(--card);border-radius:13px;padding:13px 14px;margin-bottom:12px;box-shadow:var(--shadow)}
+.whatif .wi-head{font-family:'Bricolage Grotesque',sans-serif;font-weight:700;font-size:13px;margin-bottom:9px}
+.whatif .wi-row{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.whatif .wi-row span{font-size:12px;color:var(--soft)}
+.whatif .wi-out{font-size:12px;color:var(--ink);margin-top:9px;line-height:1.6}
+
+/* ── Budget alert card ── */
+.alert-card{border-radius:14px;padding:11px 14px;margin-bottom:12px;font-size:12.5px;font-weight:600;font-family:'Bricolage Grotesque',sans-serif}
+.alert-card.bad{background:#FBE9E7;color:#B42318}
+.alert-card.warn{background:#FEF3C7;color:#92400E}
+[data-theme="dark"] .alert-card.bad{background:#3A1F1C;color:#F26B5E}
+[data-theme="dark"] .alert-card.warn{background:#3A331C;color:#FCD34D}
+
+/* ── Segmented control (expense / income toggle) ── */
+.seg{display:flex;gap:0;background:var(--paper);border-radius:11px;padding:3px;margin:4px 0 6px}
+.seg button{flex:1;border:none;background:none;border-radius:8px;padding:9px;font-family:'Bricolage Grotesque',sans-serif;font-weight:600;font-size:13px;color:var(--soft);cursor:pointer}
+.seg button.on{background:var(--card);color:var(--ink);box-shadow:var(--shadow)}
+
 /* ── Recurring banner ── */
 .rec-banner{display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--card);border:1px dashed var(--rule);border-radius:14px;padding:12px 14px;margin-bottom:12px;box-shadow:var(--shadow)}
 .rec-banner .rec-t{font-family:'Bricolage Grotesque',sans-serif;font-weight:700;font-size:13px}

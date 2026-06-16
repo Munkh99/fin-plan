@@ -5,21 +5,34 @@
 
 import { esc, CURRENCIES, APP_VERSION, PALETTE, ACCOUNT_TYPES, ACCOUNT_TYPE_MAP } from './constants.js';
 import {
-  S, setS, fmt, fmtShort, allCats, catOf, CUR, todayStr, dateStrFromTs, ord, lc, sc, ac, acctIcon,
+  S, fmt, fmtShort, allCats, catOf, CUR, todayStr, dateStrFromTs, ord, lc, sc, ac, acctIcon,
   monthLabel, nowAbs, simulateLoans, plannedLoans, cloneLoans,
-  getInt, nextColor, savMonthsToGoal, totalAccounts, migrate, persistLocal, applyCurrency,
+  getInt, nextColor, savMonthsToGoal, payoffMonths, totalAccounts, adjustAccount, applyCurrency,
 } from './state.js';
 import {
   persistSpend, persistSpendDelete, persistLoan, persistSav, addLoan, addSav,
   deleteLoanFull, deleteSavFull, persistAcc, addAcc, deleteAccFull,
   persistSettings, resetAll,
-  uploadOps, loanDoc, savDoc, spendDoc, canWrite, runChunked, trackSync,
   currentUser, syncState,
 } from './store.js';
 import { scrim, appEl, V, closeSheet, toast, confirmDialog, alertDialog, getTheme, applyTheme } from './dom.js';
 import { renderContent, renderShell } from './views.js';
 import { auth, provider, configured } from './firebase.js';
 import { signInWithPopup, signInWithRedirect, signOut } from 'firebase/auth';
+
+// Optional "draw from account" picker — only rendered when the user has accounts.
+// When a transaction picks an account, its balance is adjusted so net worth stays
+// consistent (spending leaves an account; a loan payment moves cash → debt; a
+// contribution moves cash → savings).
+function accountSelectHTML(id, selId, label = 'From account (optional)') {
+  if (!S.accountOrder.length) return '';
+  return `<label class="set-label">${label}</label>
+    <select class="set-input" id="${id}">
+      <option value="">— none —</option>
+      ${S.accountOrder.map((aid) => { const a = S.accounts[aid]; return a ? `<option value="${esc(aid)}"${selId === aid ? ' selected' : ''}>${esc(acctIcon(a.type))} ${esc(a.name)}</option>` : ''; }).join('')}
+    </select>`;
+}
+const accountVal = (id) => { const el = document.getElementById(id); return el ? (el.value || '') : ''; };
 
 // ── Add spending sheet ─────────────────────────────────────────────────────────
 export function openAddSpend(prefill) {
@@ -39,6 +52,7 @@ export function openAddSpend(prefill) {
     <input class="set-input" id="sp_note" placeholder="e.g. Lunch, Grocery run…" value="${prefill ? esc(prefill.note || '') : ''}">
     <label class="set-label">Date</label>
     <input class="set-input" type="date" id="sp_date" value="${todayStr()}" max="${todayStr()}">
+    ${accountSelectHTML('sp_account')}
     <div class="btnrow">
       <button class="ghost" id="sp_cancel">Cancel</button>
       <button class="primary" id="sp_save">Add</button>
@@ -56,8 +70,10 @@ export function openAddSpend(prefill) {
     const ts = dateStr === todayStr() ? Date.now() : new Date(dateStr + 'T12:00:00').getTime();
     const ym = dateStr.slice(0, 7);
     const id = 'sp_' + Date.now();
+    const account = accountVal('sp_account');
     V.lastCat = selCat;
-    S.spends.push({ id, ts, month: ym, amount, category: selCat, note });
+    S.spends.push({ id, ts, month: ym, amount, category: selCat, note, account: account || undefined });
+    if (account) { adjustAccount(account, -amount); persistAcc(account); }
     persistSpend(id); closeSheet(); renderContent();
     toast(`Added ${fmt(amount)} · ${catOf(selCat).label}`);
   };
@@ -81,6 +97,7 @@ export function openEditSpend(id) {
     <input class="set-input" id="sp_note" value="${esc(sp.note || '')}">
     <label class="set-label">Date</label>
     <input class="set-input" type="date" id="sp_date" value="${dateStrFromTs(sp.ts)}" max="${todayStr()}">
+    ${accountSelectHTML('sp_account', sp.account)}
     <div class="btnrow">
       <button class="ghost" id="sp_del" style="color:var(--danger)">Delete</button>
       <button class="primary" id="sp_save">Save</button>
@@ -92,6 +109,7 @@ export function openEditSpend(id) {
   });
   document.getElementById('sp_del').onclick = async () => {
     if (!(await confirmDialog('Delete this entry?', { okText: 'Delete', danger: true }))) return;
+    if (sp.account) { adjustAccount(sp.account, +sp.amount); persistAcc(sp.account); } // refund the account
     S.spends = S.spends.filter((x) => x.id !== id);
     persistSpendDelete(id); closeSheet(); renderContent();
     toast('Entry deleted');
@@ -103,8 +121,14 @@ export function openEditSpend(id) {
     const dateStr = document.getElementById('sp_date').value || dateStrFromTs(sp.ts);
     const ts = new Date(dateStr + 'T12:00:00').getTime();
     const month = dateStr.slice(0, 7);
+    const account = accountVal('sp_account');
+    // Reverse the old account effect, then apply the new one (amount/account may both change).
+    if (sp.account) adjustAccount(sp.account, +sp.amount);
+    if (account) adjustAccount(account, -amount);
+    const affected = [...new Set([sp.account, account].filter(Boolean))];
     const idx = S.spends.findIndex((x) => x.id === id);
-    if (idx >= 0) { S.spends[idx] = { ...S.spends[idx], amount, category: selCat, note, ts, month }; }
+    if (idx >= 0) { S.spends[idx] = { ...S.spends[idx], amount, category: selCat, note, ts, month, account: account || undefined }; }
+    affected.forEach((aid) => persistAcc(aid));
     persistSpend(id); closeSheet(); renderContent();
     toast('Saved');
   };
@@ -168,6 +192,12 @@ export function openLoanDetail(id) {
       <div><div class="k">Payments made</div><div class="v mono">${paysMade}</div></div>
       <div><div class="k">Gone by</div><div class="v mono">${gone}</div></div>
     </div>
+    ${done ? '' : `<div class="whatif">
+      <div class="wi-head">What if I pay extra each month?</div>
+      <div class="wi-row"><span>Extra / month</span>
+        <input class="set-input mono" id="wi_extra" inputmode="numeric" placeholder="0" style="width:130px;text-align:right"></div>
+      <div class="wi-out" id="wi_out"></div>
+    </div>`}
     ${done ? '' : `<button class="primary" id="logPay" style="width:100%;margin-bottom:10px">＋ Log a payment</button>`}
     ${log.length ? `<button class="ghost" id="undoPay" style="width:100%;margin-bottom:10px;color:var(--danger)">↩ Undo last payment</button>` : ''}
     <div class="btnrow">
@@ -177,13 +207,34 @@ export function openLoanDetail(id) {
   scrim.classList.add('open');
   document.getElementById('closeDet').onclick = closeSheet;
   document.getElementById('editLoan').onclick = () => { closeSheet(); openLoanForm(id, renderContent); };
+  // What-if: how an extra monthly amount shortens this loan's payoff.
+  const wiExtra = document.getElementById('wi_extra');
+  if (wiExtra) {
+    const baseMonthly = Math.round(plannedLoans(cloneLoans())[id] || 0);
+    const fmtM = (m) => (m === Infinity ? 'never at this payment' : `${m} month${m === 1 ? '' : 's'}`);
+    const renderWhatIf = () => {
+      const out = document.getElementById('wi_out');
+      if (!baseMonthly) { out.innerHTML = 'Set a monthly payment (Edit) to use this.'; return; }
+      const extra = parseInt((wiExtra.value || '').replace(/[^\d]/g, '')) || 0;
+      const baseM = payoffMonths(l.bal, l.rate, baseMonthly);
+      let txt = `Now: ${fmtShort(baseMonthly)}/mo → ${fmtM(baseM)}`;
+      if (extra > 0) {
+        const newM = payoffMonths(l.bal, l.rate, baseMonthly + extra);
+        const sooner = (baseM === Infinity || newM === Infinity) ? null : baseM - newM;
+        txt += `<br>With +${fmtShort(extra)}/mo → ${fmtM(newM)}${sooner != null && sooner > 0 ? ` <b style="color:var(--emerald)">(${sooner} mo sooner)</b>` : ''}`;
+      }
+      out.innerHTML = txt;
+    };
+    wiExtra.oninput = renderWhatIf;
+    renderWhatIf();
+  }
   const logPay = document.getElementById('logPay');
   if (logPay) logPay.onclick = () => openLoanLog(id);
   const undoPay = document.getElementById('undoPay');
   if (undoPay) undoPay.onclick = async () => {
     if (!(await confirmDialog('Undo the most recent logged payment for this loan?', { okText: 'Undo' }))) return;
     const last = l.paidLog.pop();
-    if (last) l.bal = last.prevBal;
+    if (last) { l.bal = last.prevBal; if (last.account) { adjustAccount(last.account, +last.paid); persistAcc(last.account); } }
     persistLoan(id); renderContent(); openLoanDetail(id);
   };
 }
@@ -203,6 +254,7 @@ function openLoanLog(id) {
       <span class="chip" data-v="${planned}">Planned ${fmtShort(planned)}</span>
       <span class="chip" data-v="${interest}">Interest only ${fmtShort(interest)}</span>
     </div>
+    ${accountSelectHTML('lp_account', null, 'Paid from account (optional)')}
     <div class="btnrow">
       <button class="ghost" id="lp_cancel">Cancel</button>
       <button class="primary" id="lp_save">Log payment</button>
@@ -213,11 +265,13 @@ function openLoanLog(id) {
   document.getElementById('lp_cancel').onclick = () => openLoanDetail(id);
   document.getElementById('lp_save').onclick = () => {
     const paid = parseInt((document.getElementById('lp_amount').value || '').replace(/[^\d]/g, '')) || 0;
+    const account = accountVal('lp_account');
     const prevBal = l.bal;
     const bal = Math.max(0, l.bal * (1 + l.rate) - paid);
     l.paidLog = l.paidLog || [];
-    l.paidLog.push({ abs: nowAbs(), paid, prevBal, bal });
+    l.paidLog.push({ abs: nowAbs(), paid, prevBal, bal, account: account || undefined });
     l.bal = bal;
+    if (account) { adjustAccount(account, -paid); persistAcc(account); }
     persistLoan(id); renderContent();
     toast(`Logged ${fmt(paid)} · ${l.name}`);
     openLoanDetail(id);
@@ -264,7 +318,7 @@ export function openSavDetail(id) {
   if (undoC) undoC.onclick = async () => {
     if (!(await confirmDialog('Undo the most recent logged contribution?', { okText: 'Undo' }))) return;
     const last = sv.contribLog.pop();
-    if (last) sv.current = Math.max(0, sv.current - last.amount);
+    if (last) { sv.current = Math.max(0, sv.current - last.amount); if (last.account) { adjustAccount(last.account, +last.amount); persistAcc(last.account); } }
     persistSav(id); renderContent(); openSavDetail(id);
   };
 }
@@ -280,6 +334,7 @@ function openSavLog(id) {
     <div class="amount-prefix">Amount (${esc(CUR.symbol)})</div>
     <input class="amount-input" id="cn_amount" inputmode="numeric" value="${planned ? planned.toLocaleString('en-US') : ''}" placeholder="0">
     ${planned ? `<div class="quick" style="justify-content:center"><span class="chip" data-v="${planned}">Planned ${fmtShort(planned)}</span></div>` : ''}
+    ${accountSelectHTML('cn_account', null, 'From account (optional)')}
     <div class="btnrow">
       <button class="ghost" id="cn_cancel">Cancel</button>
       <button class="primary" id="cn_save">Log contribution</button>
@@ -291,12 +346,15 @@ function openSavLog(id) {
   document.getElementById('cn_save').onclick = () => {
     const amount = parseInt((document.getElementById('cn_amount').value || '').replace(/[^\d]/g, '')) || 0;
     if (!amount) { toast('Enter an amount.'); return; }
+    const account = accountVal('cn_account');
     const prev = sv.current;
     sv.current = Math.min(sv.target, sv.current + amount);
+    const added = sv.current - prev;
     sv.contribLog = sv.contribLog || [];
-    sv.contribLog.push({ abs: nowAbs(), amount: sv.current - prev, prev });
+    sv.contribLog.push({ abs: nowAbs(), amount: added, prev, account: account || undefined });
+    if (account) { adjustAccount(account, -added); persistAcc(account); }
     persistSav(id); renderContent();
-    toast(`Logged ${fmt(sv.current - prev)} · ${sv.name}`);
+    toast(`Logged ${fmt(added)} · ${sv.name}`);
     openSavDetail(id);
   };
 }
@@ -410,12 +468,16 @@ export function openSavingsForm(editId, onDone) {
 // ── Recurring transactions manager ─────────────────────────────────────────────
 export function openRecurring() {
   const list = (S.recurring || []).map((r) => {
+    const inc = r.type === 'income';
     const c = catOf(r.category);
+    const icon = inc ? '💰' : c.icon;
+    const label = inc ? 'Income' : c.label;
+    const acctName = r.account && S.accounts[r.account] ? S.accounts[r.account].name : '';
     return `<div class="spend-item" data-rec="${esc(r.id)}">
-      <div class="cat-icon" style="background:${c.color}22">${esc(c.icon)}</div>
-      <div class="info"><div class="name">${r.note ? esc(r.note) : esc(c.label)}</div>
-        <div class="meta">${esc(c.label)} · day ${Math.min(31, Math.max(1, r.day || 1))}</div></div>
-      <div class="amt">${fmt(r.amount)}</div>
+      <div class="cat-icon" style="background:${inc ? '#147A5C' : c.color}22">${esc(icon)}</div>
+      <div class="info"><div class="name">${r.note ? esc(r.note) : esc(label)}</div>
+        <div class="meta">${esc(label)} · day ${Math.min(31, Math.max(1, r.day || 1))}${acctName ? ` · ${esc(acctName)}` : ''}</div></div>
+      <div class="amt"${inc ? ' style="color:var(--emerald)"' : ''}>${inc ? '+' : ''}${fmt(r.amount)}</div>
     </div>`;
   }).join('');
   scrim.innerHTML = `<div class="sheet">
@@ -433,38 +495,70 @@ export function openRecurring() {
 
 function openRecurringForm(editId) {
   const ex = editId ? (S.recurring || []).find((r) => r.id === editId) : null;
+  let type = ex ? (ex.type || 'expense') : 'expense';
   let selCat = ex ? ex.category : V.lastCat;
+  // Draft holds in-progress field values so toggling expense/income (which
+  // re-renders to show/hide the category grid) doesn't lose what was typed.
+  const draft = {
+    amount: ex ? ex.amount : '',
+    note: ex ? (ex.note || '') : '',
+    day: ex ? Math.min(31, Math.max(1, ex.day || 1)) : 1,
+    account: ex ? (ex.account || '') : '',
+  };
   const grid = () => allCats().map((c) => `
     <div class="cat-pick${selCat === c.id ? ' selected' : ''}" data-cat="${esc(c.id)}">
       <span class="icon">${esc(c.icon)}</span><span class="label">${esc(c.label)}</span>
     </div>`).join('');
-  scrim.innerHTML = `<div class="sheet">
-    <h2>${ex ? 'Edit recurring' : 'Add recurring'}</h2>
-    <div class="amount-prefix">Amount (${esc(CUR.symbol)})</div>
-    <input class="amount-input" id="rc_amount" inputmode="numeric" placeholder="0" value="${ex ? ex.amount : ''}">
-    <div class="cat-grid">${grid()}</div>
-    <label class="set-label">Label (optional)</label>
-    <input class="set-input" id="rc_note" placeholder="e.g. Rent, Netflix…" value="${ex ? esc(ex.note || '') : ''}">
-    <label class="set-label">Day of month (1–31)</label>
-    <input class="set-input mono" id="rc_day" inputmode="numeric" maxlength="2" placeholder="1" style="width:120px" value="${ex ? Math.min(31, Math.max(1, ex.day || 1)) : 1}">
-    <div class="btnrow">
-      ${editId ? '<button class="ghost" id="rc_del" style="color:var(--danger)">Delete</button>' : '<button class="ghost" id="rc_cancel">Cancel</button>'}
-      <button class="primary" id="rc_save">${ex ? 'Save' : 'Add'}</button>
-    </div></div>`;
-  scrim.classList.add('open');
-  scrim.querySelectorAll('.cat-pick').forEach((b) => (b.onclick = () => { selCat = b.dataset.cat; scrim.querySelectorAll('.cat-pick').forEach((x) => x.classList.toggle('selected', x.dataset.cat === selCat)); }));
-  const cancel = document.getElementById('rc_cancel'); if (cancel) cancel.onclick = openRecurring;
-  const del = document.getElementById('rc_del');
-  if (del) del.onclick = () => { S.recurring = (S.recurring || []).filter((r) => r.id !== editId); persistSettings(); openRecurring(); };
-  document.getElementById('rc_save').onclick = () => {
-    const amount = parseInt((document.getElementById('rc_amount').value || '').replace(/[^\d]/g, '')) || 0;
-    if (!amount) { toast('Enter an amount.'); return; }
-    const note = (document.getElementById('rc_note').value || '').trim();
-    const day = Math.min(31, Math.max(1, parseInt(document.getElementById('rc_day').value) || 1));
-    if (ex) { ex.amount = amount; ex.category = selCat; ex.note = note; ex.day = day; }
-    else { S.recurring = S.recurring || []; S.recurring.push({ id: 'rec_' + Date.now(), amount, category: selCat, note, day }); }
-    persistSettings(); openRecurring();
+  const readDraft = () => {
+    const a = document.getElementById('rc_amount'); if (a) draft.amount = (a.value || '').replace(/[^\d]/g, '');
+    const n = document.getElementById('rc_note'); if (n) draft.note = n.value;
+    const d = document.getElementById('rc_day'); if (d) draft.day = d.value;
+    draft.account = accountVal('rc_account') || draft.account;
   };
+  const render = () => {
+    scrim.innerHTML = `<div class="sheet">
+      <h2>${ex ? 'Edit recurring' : 'Add recurring'}</h2>
+      <div class="seg" id="rc_type">
+        <button data-t="expense"${type === 'expense' ? ' class="on"' : ''}>Expense</button>
+        <button data-t="income"${type === 'income' ? ' class="on"' : ''}>Income</button>
+      </div>
+      <div class="amount-prefix">Amount (${esc(CUR.symbol)})</div>
+      <input class="amount-input" id="rc_amount" inputmode="numeric" placeholder="0" value="${draft.amount}">
+      ${type === 'expense' ? `<div class="cat-grid">${grid()}</div>` : ''}
+      <label class="set-label">Label (optional)</label>
+      <input class="set-input" id="rc_note" placeholder="${type === 'income' ? 'e.g. Salary, Freelance' : 'e.g. Rent, Netflix…'}" value="${esc(draft.note)}">
+      <label class="set-label">Day of month (1–31)</label>
+      <input class="set-input mono" id="rc_day" inputmode="numeric" maxlength="2" placeholder="1" style="width:120px" value="${Math.min(31, Math.max(1, parseInt(draft.day) || 1))}">
+      ${accountSelectHTML('rc_account', draft.account, type === 'income' ? 'Deposit to account' : 'Pay from account (optional)')}
+      <div class="btnrow">
+        ${editId ? '<button class="ghost" id="rc_del" style="color:var(--danger)">Delete</button>' : '<button class="ghost" id="rc_cancel">Cancel</button>'}
+        <button class="primary" id="rc_save">${ex ? 'Save' : 'Add'}</button>
+      </div></div>`;
+    scrim.classList.add('open');
+    scrim.querySelectorAll('#rc_type button').forEach((b) => (b.onclick = () => { readDraft(); type = b.dataset.t; render(); }));
+    scrim.querySelectorAll('.cat-pick').forEach((b) => (b.onclick = () => { selCat = b.dataset.cat; scrim.querySelectorAll('.cat-pick').forEach((x) => x.classList.toggle('selected', x.dataset.cat === selCat)); }));
+    const cancel = document.getElementById('rc_cancel'); if (cancel) cancel.onclick = openRecurring;
+    const del = document.getElementById('rc_del');
+    if (del) del.onclick = () => { S.recurring = (S.recurring || []).filter((r) => r.id !== editId); persistSettings(); openRecurring(); };
+    document.getElementById('rc_save').onclick = () => {
+      const amount = parseInt((document.getElementById('rc_amount').value || '').replace(/[^\d]/g, '')) || 0;
+      if (!amount) { toast('Enter an amount.'); return; }
+      const note = (document.getElementById('rc_note').value || '').trim();
+      const day = Math.min(31, Math.max(1, parseInt(document.getElementById('rc_day').value) || 1));
+      const account = accountVal('rc_account');
+      if (ex) {
+        ex.type = type; ex.amount = amount; ex.note = note; ex.day = day; ex.account = account || undefined;
+        if (type === 'expense') { ex.category = selCat; delete ex.applied; }
+        else { delete ex.category; ex.applied = ex.applied || []; }
+      } else {
+        const t = { id: 'rec_' + Date.now(), type, amount, note, day, account: account || undefined };
+        if (type === 'expense') t.category = selCat; else t.applied = [];
+        S.recurring = S.recurring || []; S.recurring.push(t);
+      }
+      persistSettings(); openRecurring();
+    };
+  };
+  render();
 }
 
 // ── Categories manager (custom categories + per-category budgets) ──────────────
@@ -575,12 +669,14 @@ export function openAccountForm(editId, onDone) {
     </div></div>`;
   scrim.classList.add('open');
   scrim.querySelectorAll('#ac_colors .swatch').forEach((b) => (b.onclick = () => { selColor = b.dataset.color; scrim.querySelectorAll('#ac_colors .swatch').forEach((x) => x.classList.toggle('sel', x === b)); }));
-  const cancel = document.getElementById('ac_cancel'); if (cancel) cancel.onclick = () => (onDone ? onDone() : closeSheet());
+  // closeSheet() first so onDone can repaint the screen behind (onboarding/overview)
+  // or re-open the manager (openAccounts) cleanly.
+  const cancel = document.getElementById('ac_cancel'); if (cancel) cancel.onclick = () => { closeSheet(); if (onDone) onDone(); };
   const del = document.getElementById('ac_del');
   if (del) del.onclick = async () => {
     if (!(await confirmDialog(`Delete "${S.accounts[editId].name}"?`, { okText: 'Delete', danger: true }))) return;
     S.accountOrder = S.accountOrder.filter((x) => x !== editId); delete S.accounts[editId];
-    deleteAccFull(editId); if (onDone) onDone(); else { closeSheet(); renderContent(); }
+    deleteAccFull(editId); closeSheet(); if (onDone) onDone(); else renderContent();
   };
   document.getElementById('ac_save').onclick = () => {
     const name = (document.getElementById('ac_name').value || '').trim();
@@ -597,66 +693,8 @@ export function openAccountForm(editId, onDone) {
       S.accountOrder.push(id);
       addAcc(id);
     }
-    if (onDone) onDone(); else { closeSheet(); renderContent(); }
+    closeSheet(); if (onDone) onDone(); else renderContent();
   };
-}
-
-// ── Import / export backup ──────────────────────────────────────────────────────
-// Replaces all data on this account with the contents of an exported JSON file.
-// Deletes only the cloud docs the import doesn't re-create, then uploads the new
-// set (mirrors resetAll, but seeds from the file instead of defaults).
-function importReplace(next) {
-  const newLoanIds = new Set(Object.keys(next.loans || {}));
-  const newSavIds = new Set(Object.keys(next.savings || {}));
-  const newSpendIds = new Set((next.spends || []).map((s) => s.id));
-  const staleLoan = Object.keys(S.loans || {}).filter((id) => !newLoanIds.has(id));
-  const staleSav = Object.keys(S.savings || {}).filter((id) => !newSavIds.has(id));
-  const staleSpend = (S.spends || []).map((s) => s.id).filter((id) => !newSpendIds.has(id));
-  setS(next); persistLocal();
-  if (!canWrite()) return;
-  const ops = [];
-  staleLoan.forEach((id) => ops.push((b) => b.delete(loanDoc(id))));
-  staleSav.forEach((id) => ops.push((b) => b.delete(savDoc(id))));
-  staleSpend.forEach((id) => ops.push((b) => b.delete(spendDoc(id))));
-  uploadOps(next).forEach((fn) => ops.push(fn));
-  trackSync(runChunked(ops));
-}
-
-function importData() {
-  const input = document.createElement('input');
-  input.type = 'file';
-  input.accept = 'application/json,.json';
-  input.onchange = async () => {
-    const file = input.files && input.files[0];
-    if (!file) return;
-    let parsed;
-    try { parsed = JSON.parse(await file.text()); }
-    catch (e) { alertDialog('That file isn’t valid JSON.'); return; }
-    const looksValid = parsed && typeof parsed === 'object' &&
-      ('spends' in parsed || 'loans' in parsed || 'savings' in parsed || 'income' in parsed);
-    if (!looksValid) { alertDialog('That doesn’t look like a Fin Plan backup.'); return; }
-    if (!(await confirmDialog('Import will REPLACE all current data on this account with the backup. This cannot be undone. Continue?', { okText: 'Import', danger: true }))) return;
-    const next = migrate(parsed);
-    next.onboarded = true;
-    importReplace(next);
-    applyCurrency(S.currency);
-    closeSheet();
-    V.activeTab = 'overview';
-    V.view = 'shell';
-    renderShell();
-    toast('Backup imported');
-  };
-  input.click();
-}
-
-function exportData() {
-  try {
-    const blob = new Blob([JSON.stringify(S, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob), a = document.createElement('a');
-    a.href = url; a.download = 'finplan-' + new Date().toISOString().slice(0, 10) + '.json';
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1500);
-  } catch (e) { toast('Export failed.'); }
 }
 
 // ── Settings ───────────────────────────────────────────────────────────────
@@ -690,10 +728,6 @@ export function openSettings() {
   </div>
   <div class="divider"></div>
   <div class="btnrow">
-    <button class="ghost" id="exportBtn">⬇ Export</button>
-    <button class="ghost" id="importBtn">⬆ Import</button>
-  </div>
-  <div class="btnrow">
     <button class="ghost" id="resetBtn" style="color:var(--danger)">Reset all</button>
     <button class="primary" id="saveSet">Save</button>
   </div>
@@ -710,8 +744,6 @@ export function openSettings() {
     themeToggle.classList.toggle('on', next === 'dark');
     themeToggle.setAttribute('aria-checked', next === 'dark');
   };
-  document.getElementById('exportBtn').onclick = exportData;
-  document.getElementById('importBtn').onclick = importData;
   document.getElementById('acctsBtn').onclick = openAccounts;
   document.getElementById('catsBtn').onclick = openCategories;
   document.getElementById('recBtn').onclick = openRecurring;
@@ -760,7 +792,7 @@ async function doSignOut() { if (await confirmDialog('Sign out?', { okText: 'Sig
 // ── Onboarding ───────────────────────────────────────────────────────────────
 export function renderOnboarding() {
   let step = 1;
-  const STEPS = 4;
+  const STEPS = 5;
   function show() {
     const progress = Array.from({ length: STEPS }, (_, i) => `<div style="height:3px;flex:1;border-radius:3px;background:${i < step ? 'var(--ink)' : 'var(--rule)'}"></div>`).join('');
     let body = '';
@@ -768,6 +800,8 @@ export function renderOnboarding() {
       body = `<div class="welcome" style="margin-bottom:8px">What's your monthly income?</div>
         <div style="color:var(--soft);font-size:13px;margin-bottom:24px">Take-home pay after tax.</div>
         <input class="set-input mono" id="ob_income" inputmode="numeric" placeholder="0" value="${S.income || ''}" style="font-size:22px;padding:14px 16px">
+        <label class="set-label" style="margin-top:14px">Currency</label>
+        <select class="set-input" id="ob_currency">${CURRENCIES.map((c) => `<option value="${c.code}"${S.currency === c.code ? ' selected' : ''}>${c.code} (${c.symbol})</option>`).join('')}</select>
         <div class="btnrow" style="margin-top:20px"><button class="primary" id="ob_next">Continue →</button></div>`;
     } else if (step === 2) {
       body = `<div class="welcome" style="margin-bottom:8px">Monthly spending budget?</div>
@@ -785,14 +819,24 @@ export function renderOnboarding() {
       body = `<div class="welcome" style="margin-bottom:8px">Savings goals?</div>
         <div style="color:var(--soft);font-size:13px;margin-bottom:16px">Emergency fund, travel, down payment — track each separately.</div>
         ${rows}<button class="ghost" id="ob_addsav" style="width:100%;margin-bottom:20px">＋ Add a goal</button>
+        <div class="btnrow"><button class="ghost" id="ob_back">← Back</button><button class="primary" id="ob_next">${S.savingsOrder.length ? 'Continue →' : 'Skip →'}</button></div>`;
+    } else if (step === 5) {
+      const rows = S.accountOrder.length === 0 ? `<div class="empty" style="margin:0 0 12px">No accounts added yet.</div>` : S.accountOrder.map((id) => { const a = S.accounts[id]; return !a ? '' : `<div class="ob-item" style="border-left-color:${a.color}"><div style="font-family:'Bricolage Grotesque',sans-serif;font-weight:700;font-size:14px">${esc(acctIcon(a.type))} ${esc(a.name)}</div><div style="font-size:12px;color:var(--soft)">${fmt(a.balance)}</div></div>`; }).join('');
+      body = `<div class="welcome" style="margin-bottom:8px">Cash &amp; accounts?</div>
+        <div style="color:var(--soft);font-size:13px;margin-bottom:16px">Your bank, cash and e-wallet balances. These power your net worth (and spending can draw from them).</div>
+        ${rows}<button class="ghost" id="ob_addacct" style="width:100%;margin-bottom:20px">＋ Add an account</button>
         <div class="btnrow"><button class="ghost" id="ob_back">← Back</button><button class="primary" id="ob_done">Get started →</button></div>`;
     }
     appEl.innerHTML = `<div style="padding:40px 16px 0;max-width:400px;margin:0 auto">
       <div style="display:flex;gap:4px;margin-bottom:32px">${progress}</div>${body}</div>`;
     const nextBtn = document.getElementById('ob_next');
     if (nextBtn) nextBtn.onclick = () => {
-      if (step === 1) { S.income = getInt('ob_income'); persistSettings(); step++; show(); }
-      else if (step === 2) { S.budget = getInt('ob_budget'); persistSettings(); step++; show(); }
+      if (step === 1) {
+        S.income = getInt('ob_income');
+        const cur = document.getElementById('ob_currency');
+        if (cur) { S.currency = cur.value || 'MNT'; applyCurrency(S.currency); }
+        persistSettings(); step++; show();
+      } else if (step === 2) { S.budget = getInt('ob_budget'); persistSettings(); step++; show(); }
       else { step++; show(); }
     };
     const backBtn = document.getElementById('ob_back');
@@ -801,6 +845,8 @@ export function renderOnboarding() {
     if (addLoanBtn) addLoanBtn.onclick = () => openLoanForm(null, show);
     const addSavBtn = document.getElementById('ob_addsav');
     if (addSavBtn) addSavBtn.onclick = () => openSavingsForm(null, show);
+    const addAcctBtn = document.getElementById('ob_addacct');
+    if (addAcctBtn) addAcctBtn.onclick = () => openAccountForm(null, show);
     const doneBtn = document.getElementById('ob_done');
     if (doneBtn) doneBtn.onclick = () => { S.onboarded = true; persistSettings(); V.view = 'shell'; renderShell(); };
   }

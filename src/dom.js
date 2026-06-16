@@ -13,6 +13,7 @@ export const V = {
   view: 'boot',          // 'boot' | 'login' | 'onboarding' | 'shell'
   activeTab: 'overview', // current bottom-nav tab
   spendMonth: nowMonth(),// month shown on the Spending tab
+  spendQuery: '',        // all-time search query on the Spending tab
   lastCat: 'food',       // category to pre-select in the add-spend sheet
   booted: false,         // has the first render happened?
 };

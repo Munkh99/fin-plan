@@ -6,6 +6,7 @@ import {
   freeCash,
   simulateLoans,
   savMonthsToGoal,
+  payoffMonths,
 } from './finance.js';
 
 const base = () => ({
@@ -93,6 +94,23 @@ describe('savMonthsToGoal', () => {
   it('returns null when there is no monthly contribution', () => {
     const S = { ...base(), savings: { a: { current: 0, target: 1000, monthly: 0 } } };
     expect(savMonthsToGoal(S, 'a')).toBe(null);
+  });
+});
+
+describe('payoffMonths', () => {
+  it('zero-interest: balance / payment rounded up', () => {
+    expect(payoffMonths(1000, 0, 250)).toBe(4);
+    expect(payoffMonths(1000, 0, 300)).toBe(4); // ceil(3.33)
+  });
+  it('already paid off', () => {
+    expect(payoffMonths(0, 0.01, 100)).toBe(0);
+  });
+  it('returns Infinity when the payment never beats the interest', () => {
+    expect(payoffMonths(1000, 0.02, 20)).toBe(Infinity); // 20 == interest
+    expect(payoffMonths(1000, 0.02, 10)).toBe(Infinity);
+  });
+  it('a bigger payment pays off sooner', () => {
+    expect(payoffMonths(1000, 0.01, 200)).toBeLessThan(payoffMonths(1000, 0.01, 100));
   });
 });
 
