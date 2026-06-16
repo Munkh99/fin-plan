@@ -152,6 +152,18 @@ button{font-family:inherit;cursor:pointer;border:none}
 .set-input{width:100%;border:1px solid var(--rule);background:var(--card);border-radius:10px;padding:10px 12px;font-family:'IBM Plex Mono',monospace;font-size:14px;color:var(--ink);margin-top:3px;outline:none;-webkit-appearance:none}
 .set-input:focus{border-color:var(--ink)}
 select.set-input{appearance:auto;-webkit-appearance:auto;cursor:pointer}
+/* Themed dropdown (selectHTML/wireSelect) — trigger + inline option list both follow the theme. */
+.cselect{position:relative}
+.cselect-btn{display:flex;align-items:center;justify-content:space-between;gap:8px;text-align:left;cursor:pointer}
+.cselect-val{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cselect-caret{color:var(--soft);font-size:11px;transition:transform .15s;flex-shrink:0}
+.cselect.open .cselect-btn{border-color:var(--ink)}
+.cselect.open .cselect-caret{transform:rotate(180deg)}
+.cselect-menu{margin-top:4px;border:1px solid var(--rule);background:var(--card);border-radius:10px;padding:4px;max-height:240px;overflow-y:auto;box-shadow:var(--shadow)}
+.cselect-opt{display:block;width:100%;text-align:left;border:none;background:none;color:var(--ink);border-radius:7px;padding:9px 10px;font-family:'IBM Plex Mono',monospace;font-size:14px;cursor:pointer}
+.cselect-opt:hover{background:var(--paper)}
+.cselect-opt.sel{background:var(--ink);color:#fff}
+[data-theme="dark"] .cselect-opt.sel{background:#3A4150}
 .two{display:grid;grid-template-columns:1fr 1fr;gap:9px}
 .divider{height:1px;background:var(--rule);margin:14px 0}
 .row-space{display:flex;justify-content:space-between;align-items:center}

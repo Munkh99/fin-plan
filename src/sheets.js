@@ -24,18 +24,72 @@ import { signInWithPopup, signInWithRedirect, signOut } from 'firebase/auth';
 // When a transaction picks an account, its balance is adjusted so net worth stays
 // consistent (spending leaves an account; a loan payment moves cash → debt; a
 // contribution moves cash → savings).
-function accountSelectHTML(id, selId, label = 'From account (optional)') {
+// ── Themed dropdown ──────────────────────────────────────────────────────────
+// A custom <select> replacement: the trigger AND the open option list both follow
+// the theme (native <select> popups are OS-drawn and can't be themed). The menu
+// expands inline within the sheet flow so it never gets clipped by the sheet's
+// own scroll/overflow. `options` is [{ value, html }] — html is rendered as-is, so
+// callers must escape any user text themselves.
+function selectHTML(id, options, selValue, label) {
+  const cur = options.find((o) => o.value === selValue) || options[0];
+  const menu = options.map((o) => `<button type="button" class="cselect-opt${o.value === selValue ? ' sel' : ''}" data-val="${esc(o.value)}" role="option">${o.html}</button>`).join('');
+  return `${label ? `<label class="set-label">${label}</label>` : ''}
+    <div class="cselect" id="${id}_wrap">
+      <button type="button" class="set-input cselect-btn" id="${id}_btn" aria-haspopup="listbox" aria-expanded="false">
+        <span class="cselect-val">${cur ? cur.html : ''}</span><span class="cselect-caret">▾</span>
+      </button>
+      <div class="cselect-menu" id="${id}_menu" role="listbox" hidden>${menu}</div>
+      <input type="hidden" id="${id}" value="${esc(selValue || '')}">
+    </div>`;
+}
+function closeAllSelects() {
+  document.querySelectorAll('.cselect.open').forEach((w) => {
+    w.classList.remove('open');
+    const m = w.querySelector('.cselect-menu'); if (m) m.hidden = true;
+    const b = w.querySelector('.cselect-btn'); if (b) b.setAttribute('aria-expanded', 'false');
+  });
+}
+let _selectCloserAdded = false;
+function wireSelect(id, onChange) {
+  const wrap = document.getElementById(`${id}_wrap`); if (!wrap) return;
+  const btn = document.getElementById(`${id}_btn`);
+  const menu = document.getElementById(`${id}_menu`);
+  const hidden = document.getElementById(id);
+  const valEl = btn.querySelector('.cselect-val');
+  if (!_selectCloserAdded) { _selectCloserAdded = true; document.addEventListener('click', () => closeAllSelects()); }
+  btn.onclick = (e) => {
+    e.stopPropagation();
+    // Dismiss the mobile keyboard first — if a text input still holds focus the
+    // viewport resizes mid-open and the menu appears to "float"/jump.
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    const willOpen = menu.hidden;
+    closeAllSelects();
+    if (willOpen) { menu.hidden = false; btn.setAttribute('aria-expanded', 'true'); wrap.classList.add('open'); }
+  };
+  menu.querySelectorAll('.cselect-opt').forEach((opt) => {
+    opt.onclick = (e) => {
+      e.stopPropagation();
+      hidden.value = opt.dataset.val;
+      valEl.innerHTML = opt.innerHTML;
+      menu.querySelectorAll('.cselect-opt').forEach((o) => o.classList.toggle('sel', o === opt));
+      closeAllSelects();
+      if (onChange) onChange(hidden.value);
+    };
+  });
+}
+
+// "Draw from account" picker — only rendered when the user has accounts.
+function accountSelectHTML(id, selId, label = 'From account') {
   if (!S.accountOrder.length) return '';
-  const opts = S.accountOrder.map((aid) => {
+  const opts = [{ value: '', html: '— None —' }];
+  S.accountOrder.forEach((aid) => {
     const a = S.accounts[aid];
-    return a ? `<option value="${esc(aid)}"${selId === aid ? ' selected' : ''}>${esc(acctIcon(a.type))} ${esc(a.name)}</option>` : '';
-  }).join('');
-  return `<label class="set-label">${label}</label>
-    <select class="set-input" id="${id}"><option value="">— None —</option>${opts}</select>`;
+    if (a) opts.push({ value: aid, html: `${esc(acctIcon(a.type))} ${esc(a.name)}` });
+  });
+  return selectHTML(id, opts, selId || '', label);
 }
 const accountVal = (id) => { const el = document.getElementById(id); return el ? (el.value || '') : ''; };
-// Native <select> needs no JS wiring; kept so existing call sites stay unchanged.
-function wireAccountField(id) {}
+function wireAccountField(id) { wireSelect(id); }
 const dateBtnLabel = (ds) => new Date(ds + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
 // Wire a date button (id+'_btn') + hidden input (id) to the themed calendar.
@@ -444,11 +498,10 @@ export function openLoanForm(editId, onDone) {
       <div><label class="set-label">Rate %/month</label>
         <input class="set-input mono" id="nl_rate" inputmode="decimal" placeholder="1.5" value="${ex ? (ex.rate * 100).toString() : ''}"></div>
     </div>
-    <label class="set-label">Type</label>
-    <select class="set-input" id="nl_type">
-      <option value="fixed" ${!ex || ex.type === 'fixed' ? 'selected' : ''}>Fixed installment (car, mortgage…)</option>
-      <option value="revolving" ${ex && ex.type === 'revolving' ? 'selected' : ''}>Revolving / BNPL (10% min)</option>
-    </select>
+    ${selectHTML('nl_type', [
+      { value: 'fixed', html: 'Fixed installment (car, mortgage…)' },
+      { value: 'revolving', html: 'Revolving / BNPL (10% min)' },
+    ], ex && ex.type === 'revolving' ? 'revolving' : 'fixed', 'Type')}
     <div id="nl_plan_row" ${ex && ex.type === 'revolving' ? 'style="display:none"' : ''}>
       <label class="set-label">Monthly payment</label>
       <input class="set-input mono" id="nl_plan" inputmode="numeric" placeholder="0" value="${ex && ex.type === 'fixed' ? Math.round(ex.plan || 0).toLocaleString('en-US') : ''}">
@@ -460,7 +513,7 @@ export function openLoanForm(editId, onDone) {
       <button class="primary" id="nl_save">${ex ? 'Save changes' : 'Add loan'}</button>
     </div></div>`;
   scrim.classList.add('open');
-  document.getElementById('nl_type').onchange = (e) => { document.getElementById('nl_plan_row').style.display = e.target.value === 'revolving' ? 'none' : ''; };
+  wireSelect('nl_type', (v) => { document.getElementById('nl_plan_row').style.display = v === 'revolving' ? 'none' : ''; });
   const cancelBtn = document.getElementById('nl_cancel');
   if (cancelBtn) cancelBtn.onclick = closeSheet;
   const delBtn = document.getElementById('nl_del');
@@ -650,10 +703,7 @@ export function openAccountForm(editId, onDone) {
     <input class="set-input" id="ac_name" placeholder="e.g. Khan Bank, Cash wallet" value="${ex ? esc(ex.name) : ''}">
     <label class="set-label">Current balance (${esc(CUR.symbol)})</label>
     <input class="set-input mono" id="ac_bal" inputmode="numeric" placeholder="0" value="${ex ? Math.round(ex.balance).toLocaleString('en-US') : ''}">
-    <label class="set-label">Type</label>
-    <select class="set-input" id="ac_type">
-      ${ACCOUNT_TYPES.map((t) => `<option value="${esc(t.id)}"${selType === t.id ? ' selected' : ''}>${t.icon} ${t.label}</option>`).join('')}
-    </select>
+    ${selectHTML('ac_type', ACCOUNT_TYPES.map((t) => ({ value: t.id, html: `${t.icon} ${esc(t.label)}` })), selType, 'Type')}
     <label class="set-label">Color</label>
     <div class="color-row" id="ac_colors">${PALETTE.map((p) => `<button class="swatch${p === selColor ? ' sel' : ''}" data-color="${p}" style="background:${p}" aria-label="Pick color"></button>`).join('')}</div>
     <div class="btnrow">
@@ -661,6 +711,7 @@ export function openAccountForm(editId, onDone) {
       <button class="primary" id="ac_save">${ex ? 'Save changes' : 'Add account'}</button>
     </div></div>`;
   scrim.classList.add('open');
+  wireSelect('ac_type');
   scrim.querySelectorAll('#ac_colors .swatch').forEach((b) => (b.onclick = () => { selColor = b.dataset.color; scrim.querySelectorAll('#ac_colors .swatch').forEach((x) => x.classList.toggle('sel', x === b)); }));
   // closeSheet() first so onDone can repaint the screen behind (the Accounts tab,
   // onboarding, or overview) cleanly.
@@ -706,8 +757,7 @@ export function openSettings() {
   <label class="set-label">Monthly spending budget</label>
   <input class="set-input mono" id="s_budget" inputmode="numeric" placeholder="0" value="${S.budget ? S.budget.toLocaleString('en-US') : ''}">
   <div style="font-size:11px;color:var(--soft);margin:4px 0 10px">How much you aim to spend on everyday living each month (food, transport, fun…). Loan payments and savings are tracked separately. The Overview compares your actual spending against this.</div>
-  <label class="set-label">Currency</label>
-  <select class="set-input" id="s_currency">${CURRENCIES.map((c) => `<option value="${c.code}"${S.currency === c.code ? ' selected' : ''}>${c.code} (${c.symbol})</option>`).join('')}</select>
+  ${selectHTML('s_currency', CURRENCIES.map((c) => ({ value: c.code, html: `${esc(c.code)} (${esc(c.symbol)})` })), S.currency, 'Currency')}
   <div class="divider"></div>
   <div class="row-space" style="margin-bottom:4px">
     <span style="font-family:'Bricolage Grotesque',sans-serif;font-weight:700">Dark mode</span>
@@ -728,6 +778,7 @@ export function openSettings() {
     </a>
   </div></div>`;
   scrim.innerHTML = h; scrim.classList.add('open');
+  wireSelect('s_currency');
   const signOutBtn = document.getElementById('signOutBtn');
   if (signOutBtn) signOutBtn.onclick = doSignOut;
   const themeToggle = document.getElementById('themeToggle');
@@ -799,8 +850,7 @@ export function renderOnboarding() {
       body = `<div class="welcome" style="margin-bottom:8px">What's your monthly income?</div>
         <div style="color:var(--soft);font-size:13px;margin-bottom:24px">Take-home pay after tax.</div>
         <input class="set-input mono" id="ob_income" inputmode="numeric" placeholder="0" value="${S.income || ''}" style="font-size:22px;padding:14px 16px">
-        <label class="set-label" style="margin-top:14px">Currency</label>
-        <select class="set-input" id="ob_currency">${CURRENCIES.map((c) => `<option value="${c.code}"${S.currency === c.code ? ' selected' : ''}>${c.code} (${c.symbol})</option>`).join('')}</select>
+        <div style="margin-top:14px">${selectHTML('ob_currency', CURRENCIES.map((c) => ({ value: c.code, html: `${esc(c.code)} (${esc(c.symbol)})` })), S.currency, 'Currency')}</div>
         <div class="btnrow" style="margin-top:20px"><button class="primary" id="ob_next">Continue →</button></div>`;
     } else if (step === 2) {
       body = `<div class="welcome" style="margin-bottom:8px">Monthly spending budget?</div>
@@ -828,6 +878,7 @@ export function renderOnboarding() {
     }
     appEl.innerHTML = `<div style="padding:calc(40px + env(safe-area-inset-top)) 16px 0;max-width:400px;margin:0 auto">
       <div style="display:flex;gap:4px;margin-bottom:32px">${progress}</div>${body}</div>`;
+    wireSelect('ob_currency');
     const nextBtn = document.getElementById('ob_next');
     if (nextBtn) nextBtn.onclick = () => {
       if (step === 1) {
