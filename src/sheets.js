@@ -786,7 +786,7 @@ export function renderOnboarding() {
         ${rows}<button class="ghost" id="ob_addacct" style="width:100%;margin-bottom:20px">＋ Add an account</button>
         <div class="btnrow"><button class="ghost" id="ob_back">← Back</button><button class="primary" id="ob_done">Get started →</button></div>`;
     }
-    appEl.innerHTML = `<div style="padding:40px 16px 0;max-width:400px;margin:0 auto">
+    appEl.innerHTML = `<div style="padding:calc(40px + env(safe-area-inset-top)) 16px 0;max-width:400px;margin:0 auto">
       <div style="display:flex;gap:4px;margin-bottom:32px">${progress}</div>${body}</div>`;
     const nextBtn = document.getElementById('ob_next');
     if (nextBtn) nextBtn.onclick = () => {

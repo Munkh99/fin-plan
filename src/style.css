@@ -27,7 +27,9 @@ body{background:var(--paper)}
 #app{font-family:'IBM Plex Mono',ui-monospace,monospace;color:var(--ink);max-width:480px;margin:0 auto;-webkit-font-smoothing:antialiased;position:relative;min-height:100vh}
 
 /* ── Layout ── */
-.topbar-wrap{position:sticky;top:0;z-index:30;background:var(--paper);padding:14px 16px 10px;display:flex;justify-content:space-between;align-items:center}
+/* viewport-fit=cover draws under the notch/Dynamic Island — pad the top bar by
+   the safe-area inset so the title doesn't sit under the status bar. */
+.topbar-wrap{position:sticky;top:0;z-index:30;background:var(--paper);padding:calc(14px + env(safe-area-inset-top)) 16px 10px;display:flex;justify-content:space-between;align-items:center}
 .topbar-wrap .title{font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:18px}
 .content{padding:0 16px calc(100px + env(safe-area-inset-bottom))}
 
