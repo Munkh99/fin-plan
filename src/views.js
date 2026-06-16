@@ -15,7 +15,7 @@ import { currentUser, syncState } from './store.js';
 import { appEl, V, toast, alertDialog } from './dom.js';
 import {
   openAddSpend, openEditSpend, openLoanForm, openLoanDetail,
-  openSavDetail, openSettings, openAccountForm, openAddBalance,
+  openSavDetail, openSettings, openAccountForm, openAccountDetail, openAddBalance,
   renderOnboarding, renderLogin,
 } from './sheets.js';
 
@@ -476,7 +476,7 @@ function renderAccountsTab(el) {
   }
 
   el.innerHTML = h;
-  el.querySelectorAll('[data-acc]').forEach((e) => (e.onclick = () => openAccountForm(e.dataset.acc, renderContent)));
+  el.querySelectorAll('[data-acc]').forEach((e) => (e.onclick = () => openAccountDetail(e.dataset.acc)));
   el.querySelectorAll('[data-sav]').forEach((e) => (e.onclick = () => openSavDetail(e.dataset.sav)));
 }
 

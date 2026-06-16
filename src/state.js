@@ -98,6 +98,9 @@ export const nextColor = (order) => PALETTE[order.length % PALETTE.length];
 
 // ── Date / month helpers ──────────────────────────────────────────────────────
 export const monthLabel = (abs) => { const t = BASE + abs; return `${Math.floor(t / 12)}.${String((t % 12) + 1).padStart(2, '0')}`; };
+// Approximate timestamp (1st of the month) for an absolute month index — used to
+// sort month-stamped loan/savings log entries alongside dated spends.
+export const absToTs = (abs) => { const t = BASE + abs; return new Date(Math.floor(t / 12), t % 12, 1).getTime(); };
 // Current real calendar month as an absolute index (same basis as startAbs).
 export const nowAbs = () => { const d = new Date(); return d.getFullYear() * 12 + d.getMonth() - BASE; };
 // The month the user is currently logging loans for; capped so the loan timeline

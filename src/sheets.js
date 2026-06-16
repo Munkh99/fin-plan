@@ -6,7 +6,7 @@
 import { esc, CURRENCIES, APP_VERSION, PALETTE, ACCOUNT_TYPES } from './constants.js';
 import {
   S, fmt, fmtShort, allCats, catOf, CUR, todayStr, dateStrFromTs, ord, lc, sc, ac, acctIcon,
-  monthLabel, nowAbs, simulateLoans, plannedLoans, cloneLoans,
+  monthLabel, nowAbs, absToTs, simulateLoans, plannedLoans, cloneLoans,
   getInt, nextColor, savMonthsToGoal, savMonthlyInterest, payoffMonths, adjustAccount, applyCurrency,
 } from './state.js';
 import {
@@ -544,14 +544,59 @@ export function openAddBalance() {
     <div class="hint">What would you like to add to Accounts?</div>
     <button class="ghost ab-opt" id="ab_acct">🏦 Account
       <span>Bank, cash or e-wallet balance</span></button>
-    <button class="ghost ab-opt" id="ab_goal">🎯 Savings goal
-      <span>A target you save toward, with optional interest</span></button>
+    <button class="ghost ab-opt" id="ab_goal">🎯 Saving
+      <span>Money set aside toward a goal, with optional interest</span></button>
     <div class="btnrow"><button class="ghost" id="ab_cancel">Cancel</button></div>
   </div>`;
   scrim.classList.add('open');
   document.getElementById('ab_cancel').onclick = closeSheet;
   document.getElementById('ab_acct').onclick = () => openAccountForm(null, renderContent);
   document.getElementById('ab_goal').onclick = () => openSavingsForm(null, renderContent);
+}
+
+// Account detail: balance + every transaction drawn from this account
+// (spends, loan payments, savings contributions), newest first.
+export function openAccountDetail(id) {
+  const a = S.accounts[id]; if (!a) return;
+  const typeLabel = (ACCOUNT_TYPES.find((t) => t.id === a.type) || ACCOUNT_TYPES[0]).label;
+  const items = [];
+  for (const sp of S.spends) {
+    if (sp.account !== id) continue;
+    const c = catOf(sp.category);
+    items.push({ ts: sp.ts, title: sp.note || c.label, meta: c.label, amount: sp.amount, icon: c.icon, color: c.color });
+  }
+  for (const lid of S.loanOrder) {
+    const l = S.loans[lid]; if (!l) continue;
+    for (const e of (l.paidLog || [])) if (e.account === id) items.push({ ts: absToTs(e.abs), title: 'Loan payment', meta: l.name, amount: e.paid, icon: '🏦', color: '#566072' });
+  }
+  for (const sid of S.savingsOrder) {
+    const sv = S.savings[sid]; if (!sv) continue;
+    for (const e of (sv.contribLog || [])) if (e.account === id) items.push({ ts: absToTs(e.abs), title: 'Saving', meta: sv.name, amount: e.amount, icon: '🎯', color: '#147A5C' });
+  }
+  items.sort((x, y) => y.ts - x.ts);
+  const out = items.reduce((s, i) => s + i.amount, 0);
+  const dateLabel = (ts) => new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+
+  const rows = items.map((i) => `<div class="spend-item">
+    <div class="cat-icon" style="background:${i.color}22">${esc(i.icon)}</div>
+    <div class="info"><div class="name">${esc(i.title)}</div><div class="meta">${esc(i.meta)} · ${dateLabel(i.ts)}</div></div>
+    <div class="amt">−${fmt(i.amount)}</div>
+  </div>`).join('');
+
+  scrim.innerHTML = `<div class="sheet">
+    <h2><span class="dot" style="background:${ac(id)};width:12px;height:12px;border-radius:50%"></span>${esc(a.name)}</h2>
+    <div class="hint">${esc(acctIcon(a.type))} ${esc(typeLabel)} · balance ${fmt(a.balance)}</div>
+    <div class="row-space" style="margin-bottom:10px;font-size:12px;color:var(--soft)">
+      <span>${items.length} transaction${items.length === 1 ? '' : 's'} from this account</span><b class="mono">−${fmt(out)}</b>
+    </div>
+    ${rows || '<div class="empty" style="padding:14px 0">Nothing drawn from this account yet.<br>Pick it as the source when adding a spend, loan payment or saving.</div>'}
+    <div class="btnrow">
+      <button class="ghost" id="acd_edit">Edit</button>
+      <button class="primary" id="acd_close">Close</button>
+    </div></div>`;
+  scrim.classList.add('open');
+  document.getElementById('acd_close').onclick = closeSheet;
+  document.getElementById('acd_edit').onclick = () => openAccountForm(id, () => openAccountDetail(id));
 }
 
 export function openAccountForm(editId, onDone) {

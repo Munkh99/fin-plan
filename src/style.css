@@ -97,10 +97,10 @@ body{background:var(--paper)}
 .dot{width:9px;height:9px;border-radius:50%;background:var(--ac);flex:none}
 .loan .tags{display:flex;align-items:center;gap:5px;flex-shrink:0}
 .tag{font-size:10px;color:var(--soft);background:var(--paper);padding:3px 7px;border-radius:20px;white-space:nowrap}
-.loan .balrow{display:flex;align-items:flex-end;justify-content:space-between;margin-top:10px}
-.loan .bal{font-family:'Bricolage Grotesque',sans-serif;font-weight:700;font-size:23px}
-.loan .plan{text-align:right;font-size:11px;color:var(--soft)}
-.loan .plan b{display:block;font-family:'Bricolage Grotesque',sans-serif;font-size:15px;color:var(--ink);font-weight:700;margin-top:1px}
+.loan .balrow,.sav-card .balrow{display:flex;align-items:flex-end;justify-content:space-between;margin-top:10px}
+.loan .bal,.sav-card .bal{font-family:'Bricolage Grotesque',sans-serif;font-weight:700;font-size:23px}
+.loan .plan,.sav-card .plan{text-align:right;font-size:11px;color:var(--soft)}
+.loan .plan b,.sav-card .plan b{display:block;font-family:'Bricolage Grotesque',sans-serif;font-size:15px;color:var(--ink);font-weight:700;margin-top:1px}
 .lprog{height:5px;border-radius:4px;background:var(--paper);margin-top:11px;overflow:hidden}
 .lprog>span{display:block;height:100%;background:var(--ac);border-radius:4px;transition:width .5s ease}
 .donetag{font-size:11px;color:var(--emerald);font-weight:600}
