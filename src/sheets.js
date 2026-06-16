@@ -722,7 +722,11 @@ export function renderLogin() {
     <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;text-align:center;padding:0 24px">
       <div style="font-size:52px;margin-bottom:16px">₮</div>
       <div class="welcome" style="margin-bottom:8px">Fin Plan</div>
-      <div style="color:var(--soft);font-size:13px;margin-bottom:32px;line-height:1.6">Track spending, loans and savings.<br>All in one place.</div>
+      <div style="color:var(--soft);font-size:13px;margin-bottom:24px;line-height:1.6">Track spending, loans and savings.<br>All in one place.</div>
+      <div class="theme-seg" id="themeSeg" role="group" aria-label="Theme">
+        <button data-t="light"${getTheme() === 'light' ? ' class="on"' : ''}>☀ Light</button>
+        <button data-t="dark"${getTheme() === 'dark' ? ' class="on"' : ''}>🌙 Dark</button>
+      </div>
       ${configured ? `
         <button class="primary" id="signInBtn" style="max-width:280px">Sign in with Google</button>
         <div class="footnote" style="margin-top:16px">Data is private and synced to your Google account.</div>
@@ -732,6 +736,11 @@ export function renderLogin() {
         </div>
       `}
     </div>`;
+  const seg = document.getElementById('themeSeg');
+  if (seg) seg.querySelectorAll('button').forEach((b) => (b.onclick = () => {
+    applyTheme(b.dataset.t);
+    seg.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x.dataset.t === b.dataset.t));
+  }));
   if (configured) document.getElementById('signInBtn').onclick = signIn;
 }
 

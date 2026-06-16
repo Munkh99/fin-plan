@@ -25,7 +25,12 @@ export function closeSheet() { scrim.classList.remove('open'); scrim.innerHTML =
 scrim.onclick = (e) => { if (e.target === scrim) closeSheet(); };
 
 // ── Theme (light / dark) ──────────────────────────────────────────────────────
-export function getTheme() { try { return localStorage.getItem(THEMEKEY) || 'light'; } catch (e) { return 'light'; } }
+export function getTheme() {
+  try { const saved = localStorage.getItem(THEMEKEY); if (saved) return saved; } catch (e) {}
+  // No saved choice yet → follow the device's color scheme at startup.
+  try { if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark'; } catch (e) {}
+  return 'light';
+}
 export function applyTheme(t) {
   document.documentElement.dataset.theme = t;
   try { localStorage.setItem(THEMEKEY, t); } catch (e) {}
