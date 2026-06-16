@@ -198,7 +198,15 @@ export function openLoanDetail(id) {
   for (const e of log) actual.push({ abs: e.abs, bal: e.bal });
   if (!actual.length || actual[actual.length - 1].bal !== l.bal) actual.push({ abs: nowAbs(), bal: l.bal });
   const sim = simulateLoans();
-  const projected = sim.snaps.map((sn) => ({ abs: sn.abs, bal: sn.bals[id] || 0 }));
+  // simulateLoans() runs the whole portfolio until the LAST loan is paid off, so
+  // a short loan's series would keep emitting zeros out to the longest loan's
+  // date. Stop this loan's projected line at the month it reaches zero.
+  const projected = [];
+  for (const sn of sim.snaps) {
+    const bal = sn.bals[id] || 0;
+    projected.push({ abs: sn.abs, bal });
+    if (bal <= 0.5) break;
+  }
   // Stats combine any pre-migration combined-log history with new per-loan logs.
   let intPaid = 0, paysMade = 0;
   for (let k = 0; k < (S.cursor || 0); k++) { const hi = S.history[k]; if (!hi) continue; intPaid += ((hi.prev && hi.prev[id]) || 0) * l.rate; if (hi.pays && hi.pays[id] > 0) paysMade++; }
