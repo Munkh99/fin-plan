@@ -203,6 +203,13 @@ select.set-input{appearance:auto;-webkit-appearance:auto;cursor:pointer}
 .toast{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom));transform:translateX(-50%) translateY(16px);background:var(--ink);color:#fff;padding:10px 16px;border-radius:12px;font-size:13px;font-weight:600;box-shadow:0 6px 24px rgba(20,22,30,.34);opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:60;max-width:90%;text-align:center}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 
+/* ── Accounts card (Overview) ── */
+.acct-card{background:var(--card);border-radius:14px;padding:12px 16px;margin-bottom:12px;box-shadow:var(--shadow);cursor:pointer}
+.acct-head{display:flex;justify-content:space-between;align-items:center;font-family:'Bricolage Grotesque',sans-serif;font-weight:700;font-size:13px;margin-bottom:6px}
+.acct-row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-top:1px solid var(--rule);font-size:13px}
+.acct-row .al{display:flex;align-items:center;gap:9px;min-width:0}
+.acct-row .al .ai{width:28px;height:28px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0}
+
 /* ── Net worth ── */
 .networth{background:var(--card);border-radius:14px;padding:14px 16px;margin-bottom:12px;box-shadow:var(--shadow);display:flex;justify-content:space-between;align-items:center}
 .networth .k{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint);font-weight:500}

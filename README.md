@@ -22,6 +22,17 @@ Requires `FIREBASE_SERVICE_ACCOUNT` secret in GitHub repo settings.
 ## Local dev
 Open `index.html` directly in a browser (no build step needed).
 
+## Architecture
+Layered ES modules under `src/` (dependency flows downward, no cycles in the core):
+- `constants.js` — static config (categories, palette, currencies, account types, keys). No deps.
+- `state.js` — the single source of truth `S` plus pure selectors/formatters (currency, dates, categories, finance bindings, net-worth totals).
+- `store.js` — Firestore persistence + real-time listeners. Talks to the UI only through injected callbacks (`setReconcile`/`setSyncDot`), so it never imports the view layer.
+- `dom.js` — root elements, scrim/dialogs/toast, theme, and the shared UI runtime state `V`.
+- `views.js` — read-only renderers (shell, the four tabs, charts, render dispatch).
+- `sheets.js` — interactive modals (forms, detail, settings, managers, onboarding, login, import/export).
+- `main.js` — entry point: wires store callbacks + runs the boot/auth lifecycle.
+- `finance.js` — pure loan/savings math (unit-tested in `finance.test.js`).
+
 ## Stack
 - Vanilla JS, no framework
 - Firebase Auth (Google Sign-In)
