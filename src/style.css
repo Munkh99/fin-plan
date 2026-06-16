@@ -20,6 +20,9 @@
 [data-theme="dark"] .chip:active,
 [data-theme="dark"] .cat-pick.selected{background:#3A4150}
 *{box-sizing:border-box;margin:0;padding:0}
+/* Always reserve the scrollbar gutter so the centered column doesn't shift
+   sideways when switching between a tall tab (Overview) and a short one. */
+html{scrollbar-gutter:stable;overflow-y:scroll}
 body{background:var(--paper)}
 #app{font-family:'IBM Plex Mono',ui-monospace,monospace;color:var(--ink);max-width:480px;margin:0 auto;-webkit-font-smoothing:antialiased;position:relative;min-height:100vh}
 
