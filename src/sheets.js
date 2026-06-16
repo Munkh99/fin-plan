@@ -15,7 +15,7 @@ import {
   persistSettings, resetAll,
   currentUser, syncState,
 } from './store.js';
-import { scrim, appEl, V, closeSheet, toast, confirmDialog, alertDialog, getTheme, applyTheme } from './dom.js';
+import { scrim, appEl, V, closeSheet, toast, confirmDialog, alertDialog, pickDate, getTheme, applyTheme } from './dom.js';
 import { renderContent, renderShell } from './views.js';
 import { auth, provider, configured } from './firebase.js';
 import { signInWithPopup, signInWithRedirect, signOut } from 'firebase/auth';
@@ -33,6 +33,18 @@ function accountSelectHTML(id, selId, label = 'From account (optional)') {
     </select>`;
 }
 const accountVal = (id) => { const el = document.getElementById(id); return el ? (el.value || '') : ''; };
+const dateBtnLabel = (ds) => new Date(ds + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+
+// Wire a date button (id+'_btn') + hidden input (id) to the themed calendar.
+function wireDateField(id) {
+  const btn = document.getElementById(id + '_btn');
+  const hidden = document.getElementById(id);
+  if (!btn || !hidden) return;
+  btn.onclick = async () => {
+    const picked = await pickDate(hidden.value, todayStr());
+    if (picked) { hidden.value = picked; btn.textContent = dateBtnLabel(picked); }
+  };
+}
 
 // ── Add spending sheet ─────────────────────────────────────────────────────────
 export function openAddSpend(prefill) {
@@ -51,7 +63,8 @@ export function openAddSpend(prefill) {
     <label class="set-label">Note (optional)</label>
     <input class="set-input" id="sp_note" placeholder="e.g. Lunch, Grocery run…" value="${prefill ? esc(prefill.note || '') : ''}">
     <label class="set-label">Date</label>
-    <input class="set-input" type="date" id="sp_date" value="${prefill && prefill.date ? esc(prefill.date) : todayStr()}" max="${todayStr()}">
+    <input type="hidden" id="sp_date" value="${prefill && prefill.date ? esc(prefill.date) : todayStr()}">
+    <button class="set-input" id="sp_date_btn" type="button" style="text-align:left;cursor:pointer">${dateBtnLabel(prefill && prefill.date ? prefill.date : todayStr())}</button>
     ${accountSelectHTML('sp_account', prefill && prefill.account)}
     <div class="btnrow">
       <button class="ghost" id="sp_cancel">Cancel</button>
@@ -61,6 +74,7 @@ export function openAddSpend(prefill) {
   scrim.classList.add('open');
   document.getElementById('sp_amount').focus();
   document.getElementById('sp_cancel').onclick = closeSheet;
+  wireDateField('sp_date');
   scrim.querySelectorAll('.cat-pick').forEach((btn) => { btn.onclick = () => {
     // "+ New" tile: create a category inline, then reopen this sheet with the
     // in-progress entry preserved and the new category selected.
@@ -116,7 +130,8 @@ export function openEditSpend(id) {
     <label class="set-label">Note (optional)</label>
     <input class="set-input" id="sp_note" value="${esc(sp.note || '')}">
     <label class="set-label">Date</label>
-    <input class="set-input" type="date" id="sp_date" value="${dateStrFromTs(sp.ts)}" max="${todayStr()}">
+    <input type="hidden" id="sp_date" value="${dateStrFromTs(sp.ts)}">
+    <button class="set-input" id="sp_date_btn" type="button" style="text-align:left;cursor:pointer">${dateBtnLabel(dateStrFromTs(sp.ts))}</button>
     ${accountSelectHTML('sp_account', sp.account)}
     <div class="btnrow">
       <button class="ghost" id="sp_del" style="color:var(--danger)">Delete</button>
@@ -127,6 +142,7 @@ export function openEditSpend(id) {
   scrim.querySelectorAll('.cat-pick').forEach((btn) => {
     btn.onclick = () => { selCat = btn.dataset.cat; scrim.querySelectorAll('.cat-pick').forEach((b) => b.classList.toggle('selected', b.dataset.cat === selCat)); };
   });
+  wireDateField('sp_date');
   document.getElementById('sp_del').onclick = async () => {
     if (!(await confirmDialog('Delete this entry?', { okText: 'Delete', danger: true }))) return;
     if (sp.account) { adjustAccount(sp.account, +sp.amount); persistAcc(sp.account); } // refund the account

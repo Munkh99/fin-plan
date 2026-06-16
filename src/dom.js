@@ -88,3 +88,51 @@ export function alertDialog(message, okText = 'OK') {
     el.onclick = (e) => { if (e.target === el) done(); };
   });
 }
+
+// Themed calendar day-picker. Resolves to a 'YYYY-MM-DD' string, or null if
+// dismissed. Built in our own markup (not <input type=date>) so it follows the
+// in-app light/dark theme on every platform — including iOS, where the native
+// picker ignores CSS and follows the phone's system appearance instead.
+export function pickDate(current, max) {
+  return new Promise((resolve) => {
+    let el = document.getElementById('modal');
+    if (!el) { el = document.createElement('div'); el.id = 'modal'; document.body.appendChild(el); }
+    const maxD = max ? new Date(max + 'T12:00:00') : null;
+    let view = new Date((current || max || '') + 'T12:00:00');
+    if (isNaN(view.getTime())) view = new Date();
+    view.setDate(1);
+    const sel = current || '';
+    const done = (v) => { el.className = 'modal-scrim'; el.innerHTML = ''; resolve(v); };
+    const render = () => {
+      const y = view.getFullYear(), m = view.getMonth();
+      const startDow = new Date(y, m, 1).getDay();
+      const days = new Date(y, m + 1, 0).getDate();
+      const title = view.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+      const canNext = !(maxD && (y > maxD.getFullYear() || (y === maxD.getFullYear() && m >= maxD.getMonth())));
+      let cells = '';
+      for (let i = 0; i < startDow; i++) cells += '<div class="cal-cell empty"></div>';
+      for (let d = 1; d <= days; d++) {
+        const ds = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+        const disabled = maxD && new Date(y, m, d) > maxD;
+        cells += `<button class="cal-cell${ds === sel ? ' sel' : ''}" data-d="${ds}"${disabled ? ' disabled' : ''}>${d}</button>`;
+      }
+      el.className = 'modal-scrim open';
+      el.innerHTML = `<div class="modal-box cal">
+        <div class="cal-head">
+          <button class="cal-nav" id="cal_prev" aria-label="Previous month">‹</button>
+          <div class="cal-title">${title}</div>
+          <button class="cal-nav" id="cal_next" aria-label="Next month"${canNext ? '' : ' disabled'}>›</button>
+        </div>
+        <div class="cal-dow">${['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((x) => `<div>${x}</div>`).join('')}</div>
+        <div class="cal-grid">${cells}</div>
+        <div class="btnrow"><button class="ghost" id="cal_cancel">Cancel</button></div>
+      </div>`;
+      el.querySelector('#cal_prev').onclick = () => { view = new Date(y, m - 1, 1); render(); };
+      const nx = el.querySelector('#cal_next'); if (canNext) nx.onclick = () => { view = new Date(y, m + 1, 1); render(); };
+      el.querySelector('#cal_cancel').onclick = () => done(null);
+      el.querySelectorAll('.cal-cell[data-d]').forEach((b) => { if (!b.disabled) b.onclick = () => done(b.dataset.d); });
+      el.onclick = (e) => { if (e.target === el) done(null); };
+    };
+    render();
+  });
+}
