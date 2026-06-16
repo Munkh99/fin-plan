@@ -764,12 +764,10 @@ function renderSpending(el) {
 function renderLoans(el) {
   const plan = plannedLoans(cloneLoans());
   const sim = S.loanOrder.length ? simulateLoans() : null;
-  let h = `<div class="seclabel"><div class="t">Loans</div>
-    <button class="ghost" id="addLoanBtn" style="flex:0 0 auto;padding:6px 12px;font-size:12px;border-radius:10px">＋ Add</button>
-  </div>`;
+  let h = `<div class="seclabel"><div class="t">Loans</div></div>`;
 
   if (!S.loanOrder.length) {
-    h += `<div class="empty">No loans tracked.<br>Tap + Add to get started.</div>`;
+    h += `<div class="empty">No loans tracked.<br>Tap ＋ to add your first loan.</div>`;
   } else {
     const totalDebt = S.loanOrder.reduce((s, id) => s + (S.loans[id] ? S.loans[id].bal : 0), 0);
     h += `<div class="hero" style="margin-bottom:12px">
@@ -806,7 +804,6 @@ function renderLoans(el) {
     </div>`;
   }
   el.innerHTML = h;
-  document.getElementById('addLoanBtn').onclick = () => openLoanForm(null, renderContent);
   el.querySelectorAll('[data-loan]').forEach((e) => (e.onclick = () => openLoanDetail(e.dataset.loan)));
   const logBtn = document.getElementById('logLoansBtn');
   if (logBtn) logBtn.onclick = openLogLoans;
@@ -818,11 +815,9 @@ function renderLoans(el) {
 function renderSavingsTab(el) {
   const totalSaved = S.savingsOrder.reduce((s, id) => s + (S.savings[id] ? S.savings[id].current : 0), 0);
   const totalTarget = S.savingsOrder.reduce((s, id) => s + (S.savings[id] ? S.savings[id].target : 0), 0);
-  let h = `<div class="seclabel"><div class="t">Savings goals</div>
-    <button class="ghost" id="addSavBtn" style="flex:0 0 auto;padding:6px 12px;font-size:12px;border-radius:10px">＋ Add</button>
-  </div>`;
+  let h = `<div class="seclabel"><div class="t">Savings goals</div></div>`;
   if (!S.savingsOrder.length) {
-    h += `<div class="empty">No savings goals yet.<br>Tap + Add to create one.</div>`;
+    h += `<div class="empty">No savings goals yet.<br>Tap ＋ to create one.</div>`;
   } else {
     h += `<div class="hero" style="margin-bottom:12px">
       <div class="eyebrow">Total saved</div>
@@ -853,7 +848,6 @@ function renderSavingsTab(el) {
     }
   }
   el.innerHTML = h;
-  document.getElementById('addSavBtn').onclick = () => openSavingsForm(null, renderContent);
   el.querySelectorAll('[data-sav]').forEach((e) => (e.onclick = () => openSavDetail(e.dataset.sav)));
 }
 
@@ -1278,7 +1272,7 @@ function renderLogin() {
         <button class="primary" id="signInBtn" style="max-width:280px">Sign in with Google</button>
         <div class="footnote" style="margin-top:16px">Data is private and synced to your Google account.</div>
       ` : `
-        <div style="background:#FBE9E7;border-radius:12px;padding:14px 16px;font-size:12px;line-height:1.7;color:var(--danger);max-width:320px">
+        <div style="background:#FBE9E7;border-radius:12px;padding:14px 16px;font-size:12px;line-height:1.7;color:#B42318;max-width:320px">
           Firebase not configured. Edit <strong>src/firebase.js</strong>.
         </div>
       `}
