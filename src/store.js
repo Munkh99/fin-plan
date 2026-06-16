@@ -52,7 +52,6 @@ function settingsPayload() {
     savingsOrder: S.savingsOrder,
     accountOrder: S.accountOrder,
     history: S.history,
-    catBudgets: S.catBudgets,
     customCategories: S.customCategories,
     currency: S.currency,
     schema: SCHEMA,
@@ -204,7 +203,6 @@ export function uploadOps(src) {
     savingsOrder: src.savingsOrder || [],
     accountOrder: src.accountOrder || [],
     history: src.history || [],
-    catBudgets: src.catBudgets || {},
     customCategories: src.customCategories || [],
     currency: src.currency || 'MNT',
     schema: SCHEMA,
@@ -268,7 +266,6 @@ export function attachListeners() {
     S.savingsOrder = d.savingsOrder || [];
     S.accountOrder = d.accountOrder || [];
     S.history = d.history || [];
-    S.catBudgets = d.catBudgets || {};
     S.customCategories = d.customCategories || [];
     S.currency = d.currency || 'MNT';
     applyCurrency(S.currency);

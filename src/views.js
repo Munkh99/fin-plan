@@ -351,10 +351,8 @@ function renderSpending(el) {
     if (sortedCats.length) {
       h += `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">`;
       for (const c of sortedCats) {
-        const b = S.catBudgets[c.id];
-        const over = b && cats[c.id] > b;
-        h += `<div style="display:flex;align-items:center;gap:5px;background:var(--card);border-radius:20px;padding:5px 10px;font-size:11px;box-shadow:var(--shadow);${over ? 'color:var(--danger)' : ''}">
-          <span>${esc(c.icon)}</span><span style="font-weight:600">${fmtShort(cats[c.id])}${b ? ` / ${fmtShort(b)}` : ''}</span>${over ? ' ⚠' : ''}
+        h += `<div style="display:flex;align-items:center;gap:5px;background:var(--card);border-radius:20px;padding:5px 10px;font-size:11px;box-shadow:var(--shadow)">
+          <span>${esc(c.icon)}</span><span style="font-weight:600">${fmtShort(cats[c.id])}</span>
         </div>`;
       }
       h += `</div>`;

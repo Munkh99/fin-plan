@@ -41,7 +41,7 @@ export function openAddSpend(prefill) {
     <div class="cat-pick${selCat === c.id ? ' selected' : ''}" data-cat="${esc(c.id)}">
       <span class="icon">${esc(c.icon)}</span>
       <span class="label">${esc(c.label)}</span>
-    </div>`).join('');
+    </div>`).join('') + `<div class="cat-pick cat-new" data-new="1"><span class="icon">＋</span><span class="label">New</span></div>`;
 
   scrim.innerHTML = `<div class="sheet">
     <h2>Add spending</h2>
@@ -51,8 +51,8 @@ export function openAddSpend(prefill) {
     <label class="set-label">Note (optional)</label>
     <input class="set-input" id="sp_note" placeholder="e.g. Lunch, Grocery run…" value="${prefill ? esc(prefill.note || '') : ''}">
     <label class="set-label">Date</label>
-    <input class="set-input" type="date" id="sp_date" value="${todayStr()}" max="${todayStr()}">
-    ${accountSelectHTML('sp_account')}
+    <input class="set-input" type="date" id="sp_date" value="${prefill && prefill.date ? esc(prefill.date) : todayStr()}" max="${todayStr()}">
+    ${accountSelectHTML('sp_account', prefill && prefill.account)}
     <div class="btnrow">
       <button class="ghost" id="sp_cancel">Cancel</button>
       <button class="primary" id="sp_save">Add</button>
@@ -61,16 +61,36 @@ export function openAddSpend(prefill) {
   scrim.classList.add('open');
   document.getElementById('sp_amount').focus();
   document.getElementById('sp_cancel').onclick = closeSheet;
-  scrim.querySelectorAll('.cat-pick').forEach((btn) => { btn.onclick = () => { selCat = btn.dataset.cat; scrim.querySelectorAll('.cat-pick').forEach((b) => b.classList.toggle('selected', b.dataset.cat === selCat)); }; });
-  document.getElementById('sp_save').onclick = () => {
+  scrim.querySelectorAll('.cat-pick').forEach((btn) => { btn.onclick = () => {
+    // "+ New" tile: create a category inline, then reopen this sheet with the
+    // in-progress entry preserved and the new category selected.
+    if (btn.dataset.new) {
+      const cur = {
+        amount: (document.getElementById('sp_amount').value || '').replace(/[^\d]/g, ''),
+        note: document.getElementById('sp_note').value,
+        date: document.getElementById('sp_date').value,
+        account: accountVal('sp_account'),
+      };
+      openNewCategory((id) => openAddSpend({ ...cur, category: id || selCat }));
+      return;
+    }
+    selCat = btn.dataset.cat;
+    scrim.querySelectorAll('.cat-pick').forEach((b) => b.classList.toggle('selected', b.dataset.cat === selCat));
+  }; });
+  document.getElementById('sp_save').onclick = async () => {
     const amount = parseInt((document.getElementById('sp_amount').value || '').replace(/[^\d]/g, '')) || 0;
     if (!amount) { toast('Enter an amount.'); return; }
     const note = (document.getElementById('sp_note').value || '').trim();
     const dateStr = document.getElementById('sp_date').value || todayStr();
     const ts = dateStr === todayStr() ? Date.now() : new Date(dateStr + 'T12:00:00').getTime();
     const ym = dateStr.slice(0, 7);
-    const id = 'sp_' + Date.now();
     const account = accountVal('sp_account');
+    // Warn (don't block) if it would overdraw the chosen account.
+    if (account) {
+      const a = S.accounts[account];
+      if (a && amount > a.balance && !(await confirmDialog(`${fmt(amount)} is more than "${a.name}" holds (${fmt(a.balance)}). Add it anyway? The account will go negative.`, { okText: 'Add anyway', danger: true }))) return;
+    }
+    const id = 'sp_' + Date.now();
     V.lastCat = selCat;
     S.spends.push({ id, ts, month: ym, amount, category: selCat, note, account: account || undefined });
     if (account) { adjustAccount(account, -amount); persistAcc(account); }
@@ -114,7 +134,7 @@ export function openEditSpend(id) {
     persistSpendDelete(id); closeSheet(); renderContent();
     toast('Entry deleted');
   };
-  document.getElementById('sp_save').onclick = () => {
+  document.getElementById('sp_save').onclick = async () => {
     const amount = parseInt((document.getElementById('sp_amount').value || '').replace(/[^\d]/g, '')) || 0;
     if (!amount) { toast('Enter an amount.'); return; }
     const note = (document.getElementById('sp_note').value || '').trim();
@@ -122,6 +142,14 @@ export function openEditSpend(id) {
     const ts = new Date(dateStr + 'T12:00:00').getTime();
     const month = dateStr.slice(0, 7);
     const account = accountVal('sp_account');
+    // Warn (don't block) if it would overdraw the chosen account. The account
+    // balance still includes this spend's old deduction, so add it back when the
+    // account is unchanged to get what's actually available.
+    if (account) {
+      const a = S.accounts[account];
+      const available = a ? a.balance + (sp.account === account ? sp.amount : 0) : 0;
+      if (a && amount > available && !(await confirmDialog(`${fmt(amount)} is more than "${a.name}" holds (${fmt(available)}). Save anyway? The account will go negative.`, { okText: 'Save anyway', danger: true }))) return;
+    }
     // Reverse the old account effect, then apply the new one (amount/account may both change).
     if (sp.account) adjustAccount(sp.account, +sp.amount);
     if (account) adjustAccount(account, -amount);
@@ -263,9 +291,13 @@ function openLoanLog(id) {
   document.getElementById('lp_amount').focus();
   scrim.querySelectorAll('.chip').forEach((c) => (c.onclick = () => { document.getElementById('lp_amount').value = Number(c.dataset.v).toLocaleString('en-US'); }));
   document.getElementById('lp_cancel').onclick = () => openLoanDetail(id);
-  document.getElementById('lp_save').onclick = () => {
+  document.getElementById('lp_save').onclick = async () => {
     const paid = parseInt((document.getElementById('lp_amount').value || '').replace(/[^\d]/g, '')) || 0;
     const account = accountVal('lp_account');
+    if (account) {
+      const acc = S.accounts[account];
+      if (acc && paid > acc.balance && !(await confirmDialog(`${fmt(paid)} is more than "${acc.name}" holds (${fmt(acc.balance)}). Log it anyway? The account will go negative.`, { okText: 'Log anyway', danger: true }))) return;
+    }
     const prevBal = l.bal;
     const bal = Math.max(0, l.bal * (1 + l.rate) - paid);
     l.paidLog = l.paidLog || [];
@@ -348,10 +380,14 @@ function openSavLog(id) {
   document.getElementById('cn_amount').focus();
   scrim.querySelectorAll('.chip').forEach((c) => (c.onclick = () => { document.getElementById('cn_amount').value = Number(c.dataset.v).toLocaleString('en-US'); }));
   document.getElementById('cn_cancel').onclick = () => openSavDetail(id);
-  document.getElementById('cn_save').onclick = () => {
+  document.getElementById('cn_save').onclick = async () => {
     const amount = parseInt((document.getElementById('cn_amount').value || '').replace(/[^\d]/g, '')) || 0;
     if (!amount) { toast('Enter an amount.'); return; }
     const account = accountVal('cn_account');
+    if (account) {
+      const acc = S.accounts[account];
+      if (acc && amount > acc.balance && !(await confirmDialog(`${fmt(amount)} is more than "${acc.name}" holds (${fmt(acc.balance)}). Save anyway? The account will go negative.`, { okText: 'Save anyway', danger: true }))) return;
+    }
     const prev = sv.current;
     sv.current = Math.min(sv.target, sv.current + amount);
     const added = sv.current - prev;
@@ -474,65 +510,39 @@ export function openSavingsForm(editId, onDone) {
   };
 }
 
-// ── Categories manager (custom categories + per-category budgets) ──────────────
-export function openCategories() {
-  const rows = allCats().map((c) => {
-    const custom = (S.customCategories || []).some((x) => x.id === c.id);
-    const bud = S.catBudgets[c.id] || '';
-    return `<div class="catbud-row">
-      <span class="lbl">${esc(c.icon)} ${esc(c.label)}</span>
-      <span style="display:flex;align-items:center;gap:6px">
-        <input class="set-input mono" data-bud="${esc(c.id)}" inputmode="numeric" placeholder="no limit" value="${bud ? Math.round(bud).toLocaleString('en-US') : ''}">
-        ${custom ? `<button class="iconbtn cat-del" data-del="${esc(c.id)}" aria-label="Delete category" style="width:30px;height:30px;font-size:16px;color:var(--danger)">×</button>` : ''}
-      </span>
-    </div>`;
-  }).join('');
+// ── New category (created inline from the spend category picker) ───────────────
+// Categories are created where they're used — when adding a spend — not in a
+// separate settings manager. onDone(newId | null) is called when finished.
+function openNewCategory(onDone) {
+  let selColor = PALETTE[0];
   scrim.innerHTML = `<div class="sheet">
-    <h2>Categories</h2>
-    <div class="hint">Set an optional monthly budget per category (shown on the Spending tab). Add your own categories below.</div>
-    ${rows}
-    <div class="divider"></div>
-    <label class="set-label">New category name</label>
-    <input class="set-input" id="cc_name" placeholder="e.g. Pets, Kids, Subscriptions">
+    <h2>New category</h2>
+    <label class="set-label">Name</label>
+    <input class="set-input" id="nc_name" placeholder="e.g. Pets, Kids, Subscriptions">
     <div class="two" style="margin-top:9px">
       <div><label class="set-label">Emoji / icon</label>
-        <input class="set-input" id="cc_icon" placeholder="🏷" maxlength="2"></div>
+        <input class="set-input" id="nc_icon" placeholder="🏷" maxlength="2"></div>
       <div><label class="set-label">Color</label>
-        <div class="color-row" id="cc_colors">${PALETTE.map((p, i) => `<button class="swatch${i === 0 ? ' sel' : ''}" data-color="${p}" style="background:${p}" aria-label="Pick color ${i + 1}"></button>`).join('')}</div></div>
+        <div class="color-row" id="nc_colors">${PALETTE.map((p, i) => `<button class="swatch${i === 0 ? ' sel' : ''}" data-color="${p}" style="background:${p}" aria-label="Pick color ${i + 1}"></button>`).join('')}</div></div>
     </div>
-    <button class="ghost" id="cc_add" style="width:100%;margin-top:12px">＋ Add category</button>
-    <div class="btnrow"><button class="primary" id="cc_done">Done</button></div>
-  </div>`;
+    <div class="btnrow">
+      <button class="ghost" id="nc_cancel">Cancel</button>
+      <button class="primary" id="nc_add">Add category</button>
+    </div></div>`;
   scrim.classList.add('open');
-  let selColor = PALETTE[0];
-  scrim.querySelectorAll('#cc_colors .swatch').forEach((b) => (b.onclick = () => { selColor = b.dataset.color; scrim.querySelectorAll('#cc_colors .swatch').forEach((x) => x.classList.toggle('sel', x === b)); }));
-  // Read every budget input into state (called before any re-render so edits stick).
-  const saveBudgets = () => {
-    scrim.querySelectorAll('[data-bud]').forEach((inp) => {
-      const id = inp.getAttribute('data-bud');
-      const v = parseInt((inp.value || '').replace(/[^\d]/g, '')) || 0;
-      if (v > 0) S.catBudgets[id] = v; else delete S.catBudgets[id];
-    });
-  };
-  scrim.querySelectorAll('.cat-del').forEach((b) => (b.onclick = async () => {
-    const id = b.getAttribute('data-del');
-    const c = catOf(id);
-    if (!(await confirmDialog(`Delete the “${c.label}” category? Existing entries keep their amounts but show as “Other”.`, { okText: 'Delete', danger: true }))) return;
-    saveBudgets();
-    S.customCategories = (S.customCategories || []).filter((x) => x.id !== id);
-    delete S.catBudgets[id];
-    persistSettings(); openCategories();
-  }));
-  document.getElementById('cc_add').onclick = () => {
-    const name = (document.getElementById('cc_name').value || '').trim();
+  document.getElementById('nc_name').focus();
+  scrim.querySelectorAll('#nc_colors .swatch').forEach((b) => (b.onclick = () => { selColor = b.dataset.color; scrim.querySelectorAll('#nc_colors .swatch').forEach((x) => x.classList.toggle('sel', x === b)); }));
+  document.getElementById('nc_cancel').onclick = () => onDone(null);
+  document.getElementById('nc_add').onclick = () => {
+    const name = (document.getElementById('nc_name').value || '').trim();
     if (!name) { toast('Enter a category name.'); return; }
-    const icon = (document.getElementById('cc_icon').value || '').trim() || '🏷';
-    saveBudgets();
+    const icon = (document.getElementById('nc_icon').value || '').trim() || '🏷';
+    const id = 'cat_' + Date.now();
     S.customCategories = S.customCategories || [];
-    S.customCategories.push({ id: 'cat_' + Date.now(), label: name, icon, color: selColor });
-    persistSettings(); openCategories();
+    S.customCategories.push({ id, label: name, icon, color: selColor });
+    persistSettings();
+    onDone(id);
   };
-  document.getElementById('cc_done').onclick = () => { saveBudgets(); persistSettings(); openSettings(); };
 }
 
 // ── Add to Accounts chooser (FAB on the Accounts tab) ──────────────────────────
@@ -668,10 +678,6 @@ export function openSettings() {
   <label class="set-label">Currency</label>
   <select class="set-input" id="s_currency">${CURRENCIES.map((c) => `<option value="${c.code}"${S.currency === c.code ? ' selected' : ''}>${c.code} (${c.symbol})</option>`).join('')}</select>
   <div class="divider"></div>
-  <div class="btnrow" style="margin-top:0">
-    <button class="ghost" id="catsBtn">🏷 Categories</button>
-  </div>
-  <div class="divider"></div>
   <div class="row-space" style="margin-bottom:4px">
     <span style="font-family:'Bricolage Grotesque',sans-serif;font-weight:700">Dark mode</span>
     <button class="toggle${getTheme() === 'dark' ? ' on' : ''}" id="themeToggle" role="switch" aria-checked="${getTheme() === 'dark'}"><span class="knob"></span></button>
@@ -700,7 +706,6 @@ export function openSettings() {
     themeToggle.classList.toggle('on', next === 'dark');
     themeToggle.setAttribute('aria-checked', next === 'dark');
   };
-  document.getElementById('catsBtn').onclick = openCategories;
   document.getElementById('resetBtn').onclick = async () => { if (await confirmDialog('Erase everything? This cannot be undone.', { okText: 'Erase', danger: true })) { resetAll(); closeSheet(); V.view = 'onboarding'; renderOnboarding(); } };
   const gi = (id) => parseInt((document.getElementById(id).value || '').replace(/[^\d]/g, '')) || 0;
   document.getElementById('saveSet').onclick = () => {

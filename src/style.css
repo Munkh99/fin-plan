@@ -241,9 +241,6 @@ select.set-input{appearance:auto;-webkit-appearance:auto;cursor:pointer}
 .search-input:focus{border-color:var(--ink)}
 
 /* ── Category budgets ── */
-.catbud-row{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:7px;font-size:13px}
-.catbud-row .lbl{display:flex;align-items:center;gap:7px}
-.catbud-row input{width:120px}
 
 /* ── Color swatches (custom category picker) ── */
 .color-row{display:flex;flex-wrap:wrap;gap:7px;margin-top:5px}

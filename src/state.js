@@ -23,7 +23,6 @@ export function defaults() {
     cursor: 0,
     startAbs: now.getFullYear() * 12 + now.getMonth() - BASE,
     history: [],
-    catBudgets: {},        // { categoryId: monthly limit }
     customCategories: [],  // user-added categories: { id, label, icon, color }
     currency: 'MNT',       // display currency code (see CURRENCIES)
   };
@@ -42,7 +41,6 @@ export function migrate(s) {
   if (!s.accountOrder) s.accountOrder = [];
   if (!s.spends) s.spends = [];
   if (!s.history) s.history = [];
-  if (!s.catBudgets) s.catBudgets = {};
   if (!s.customCategories) s.customCategories = [];
   if (!s.currency) s.currency = 'MNT';
   if (s.budget === undefined) s.budget = s.expenses || 0;
