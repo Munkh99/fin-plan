@@ -82,11 +82,18 @@ export function payoffMonths(bal, rate, monthly) {
   return m;
 }
 
+// Months until a goal is reached, accounting for the monthly contribution AND
+// optional interest (sv.rate is an ANNUAL rate as a decimal, e.g. 0.12 = 12%/yr;
+// compounded monthly). Returns null if it never gets there (no contribution and
+// no growth, or it would take >100 years).
 export function savMonthsToGoal(S, id) {
   const sv = S.savings[id];
   if (!sv) return null;
-  const rem = sv.target - sv.current;
-  if (rem <= 0) return 0;
-  if (sv.monthly <= 0) return null;
-  return Math.ceil(rem / sv.monthly);
+  if (sv.current >= sv.target) return 0;
+  const r = (sv.rate || 0) / 12;       // monthly rate
+  const monthly = sv.monthly || 0;
+  if (monthly <= 0 && r <= 0) return null;
+  let bal = sv.current, n = 0;
+  while (bal < sv.target && n < 1200) { bal = bal * (1 + r) + monthly; n++; }
+  return n >= 1200 ? null : n;
 }

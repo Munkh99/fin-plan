@@ -143,6 +143,8 @@ export const freeCash = () => F.freeCash(S);
 // (no global month cursor), so the projection always starts "this month".
 export const simulateLoans = () => F.simulateLoans({ ...S, cursor: Math.max(0, nowAbs() - S.startAbs) });
 export const savMonthsToGoal = (id) => F.savMonthsToGoal(S, id);
+// This month's interest a goal would earn at its current balance (annual rate / 12).
+export const savMonthlyInterest = (id) => { const sv = S.savings[id]; return sv ? sv.current * ((sv.rate || 0) / 12) : 0; };
 export const payoffMonths = (bal, rate, monthly) => F.payoffMonths(bal, rate, monthly);
 
 // Totals across the entity collections. Net worth = liquid accounts + money set

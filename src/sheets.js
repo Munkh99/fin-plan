@@ -7,7 +7,7 @@ import { esc, CURRENCIES, APP_VERSION, PALETTE, ACCOUNT_TYPES, ACCOUNT_TYPE_MAP 
 import {
   S, fmt, fmtShort, allCats, catOf, CUR, todayStr, dateStrFromTs, ord, lc, sc, ac, acctIcon,
   monthLabel, nowAbs, simulateLoans, plannedLoans, cloneLoans,
-  getInt, nextColor, savMonthsToGoal, payoffMonths, totalAccounts, adjustAccount, applyCurrency,
+  getInt, nextColor, savMonthsToGoal, savMonthlyInterest, payoffMonths, totalAccounts, adjustAccount, applyCurrency,
 } from './state.js';
 import {
   persistSpend, persistSpendDelete, persistLoan, persistSav, addLoan, addSav,
@@ -288,7 +288,7 @@ export function openSavDetail(id) {
   const hasLog = (sv.contribLog || []).length > 0;
   scrim.innerHTML = `<div class="sheet">
     <h2><span class="dot" style="background:${color};width:12px;height:12px;border-radius:50%"></span>${esc(sv.name)}</h2>
-    <div class="hint">${done ? 'Goal reached!' : 'Saving ' + fmtShort(sv.monthly) + '/month'}</div>
+    <div class="hint">${done ? 'Goal reached!' : 'Saving ' + fmtShort(sv.monthly) + '/month'}${sv.rate ? ` · ${+(sv.rate * 100).toFixed(2)}%/yr (~${fmtShort(savMonthlyInterest(id))}/mo)` : ''}</div>
     <div style="background:var(--card);border-radius:12px;padding:14px;margin-bottom:14px">
       <div style="height:8px;border-radius:6px;background:var(--paper);overflow:hidden">
         <div style="height:100%;width:${prog}%;background:${color};border-radius:6px;transition:width .5s"></div>
@@ -328,12 +328,17 @@ export function openSavDetail(id) {
 function openSavLog(id) {
   const sv = S.savings[id]; if (!sv || sv.current >= sv.target) return;
   const planned = Math.round(sv.monthly || 0);
+  const interest = Math.round(savMonthlyInterest(id));
   scrim.innerHTML = `<div class="sheet">
     <h2>Log contribution</h2>
     <div class="hint"><span class="dot" style="background:${sc(id)};display:inline-block;width:9px;height:9px;border-radius:50%"></span> ${esc(sv.name)} · ${fmt(sv.current)} of ${fmt(sv.target)}</div>
     <div class="amount-prefix">Amount (${esc(CUR.symbol)})</div>
     <input class="amount-input" id="cn_amount" inputmode="numeric" value="${planned ? planned.toLocaleString('en-US') : ''}" placeholder="0">
-    ${planned ? `<div class="quick" style="justify-content:center"><span class="chip" data-v="${planned}">Planned ${fmtShort(planned)}</span></div>` : ''}
+    ${(planned || interest > 0) ? `<div class="quick" style="justify-content:center">
+      ${planned ? `<span class="chip" data-v="${planned}">Planned ${fmtShort(planned)}</span>` : ''}
+      ${interest > 0 ? `<span class="chip" data-v="${interest}">Interest ${fmtShort(interest)}</span>` : ''}
+    </div>` : ''}
+    ${interest > 0 ? `<div style="font-size:11px;color:var(--soft);margin-top:8px">Tip: log interest with no account — it's earned, not transferred.</div>` : ''}
     ${accountSelectHTML('cn_account', null, 'From account (optional)')}
     <div class="btnrow">
       <button class="ghost" id="cn_cancel">Cancel</button>
@@ -435,6 +440,9 @@ export function openSavingsForm(editId, onDone) {
     </div>
     <label class="set-label">Monthly contribution</label>
     <input class="set-input mono" id="sv_monthly" inputmode="numeric" placeholder="0" value="${ex ? Math.round(ex.monthly).toLocaleString('en-US') : ''}">
+    <label class="set-label">Annual interest % (optional)</label>
+    <input class="set-input mono" id="sv_rate" inputmode="decimal" placeholder="e.g. 12" style="width:120px" value="${ex && ex.rate ? +(ex.rate * 100).toFixed(2) : ''}">
+    <div style="font-size:11px;color:var(--soft);margin:4px 0 2px">If this goal sits in an interest-bearing account, its balance grows each month and the goal is reached sooner.</div>
     <div class="btnrow">
       ${editId ? `<button class="ghost" id="sv_del" style="color:var(--danger)">Delete</button>` : `<button class="ghost" id="sv_cancel">Cancel</button>`}
       <button class="primary" id="sv_save">${ex ? 'Save changes' : 'Add goal'}</button>
@@ -452,12 +460,13 @@ export function openSavingsForm(editId, onDone) {
     const name = (document.getElementById('sv_name').value || '').trim();
     if (!name) { toast('Enter a goal name.'); return; }
     const current = getInt('sv_current'), target = getInt('sv_target'), monthly = getInt('sv_monthly');
+    const rate = (parseFloat(document.getElementById('sv_rate').value) || 0) / 100;
     if (editId) {
-      const sv = S.savings[editId]; sv.name = name; sv.current = current; sv.target = target; sv.monthly = monthly;
+      const sv = S.savings[editId]; sv.name = name; sv.current = current; sv.target = target; sv.monthly = monthly; sv.rate = rate;
       persistSav(editId);
     } else {
       const id = 'sav_' + Date.now();
-      S.savings[id] = { name, current, target, monthly, color: nextColor(S.savingsOrder), contribLog: [] };
+      S.savings[id] = { name, current, target, monthly, rate, color: nextColor(S.savingsOrder), contribLog: [] };
       S.savingsOrder.push(id);
       addSav(id);
     }

@@ -95,6 +95,17 @@ describe('savMonthsToGoal', () => {
     const S = { ...base(), savings: { a: { current: 0, target: 1000, monthly: 0 } } };
     expect(savMonthsToGoal(S, 'a')).toBe(null);
   });
+  it('interest reaches the goal no later than contributions alone', () => {
+    const plain = { ...base(), savings: { a: { current: 0, target: 1000, monthly: 100 } }, savingsOrder: ['a'] };
+    const withRate = { ...base(), savings: { a: { current: 0, target: 1000, monthly: 100, rate: 0.12 } }, savingsOrder: ['a'] };
+    expect(savMonthsToGoal(withRate, 'a')).toBeLessThanOrEqual(savMonthsToGoal(plain, 'a'));
+  });
+  it('interest alone (no monthly) still reaches the goal when there is a balance', () => {
+    const S = { ...base(), savings: { a: { current: 900, target: 1000, monthly: 0, rate: 0.12 } }, savingsOrder: ['a'] };
+    const m = savMonthsToGoal(S, 'a');
+    expect(m).toBeGreaterThan(0);
+    expect(Number.isFinite(m)).toBe(true);
+  });
 });
 
 describe('payoffMonths', () => {
