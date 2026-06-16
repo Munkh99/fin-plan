@@ -1,6 +1,9 @@
 @import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
 
 :root{
+  /* color-scheme makes native UI (the date-picker calendar popup, its icon,
+     form controls, scrollbars) follow the app theme. */
+  color-scheme:light;
   --paper:#E9EAEE;--card:#FFFFFF;--ink:#191B21;--soft:#5A5F6B;--faint:#9499A3;--rule:#DADCE2;
   --indigo:#2B2D77;--emerald:#147A5C;--burnt:#C2410C;--danger:#B42318;
   --shadow:0 1px 2px rgba(20,22,30,.06),0 8px 24px rgba(20,22,30,.06);
@@ -8,6 +11,7 @@
 /* Dark theme: flip page/card/text; keep the "ink" accent surfaces dark so white
    text on them stays readable. */
 [data-theme="dark"]{
+  color-scheme:dark;
   --paper:#15171C;--card:#1F222A;--ink:#ECEDF0;--soft:#A2A9B4;--faint:#727A86;--rule:#2D323C;
   --danger:#F26B5E;
   --shadow:0 1px 2px rgba(0,0,0,.45),0 8px 24px rgba(0,0,0,.45);
