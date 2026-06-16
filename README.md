@@ -4,21 +4,16 @@ Personal finance tracker — loan payoff planning + monthly spending. PWA, works
 
 ## Pending setup (one-time)
 
-- [ ] Firestore → Rules → apply the security rules below
+- [ ] Deploy the security rules: `firebase deploy --only firestore:rules` (the canonical rules live in [`firestore.rules`](firestore.rules) and are wired into `firebase.json`)
 - [ ] Firebase Console → Authentication → Settings → Authorized domains → add `fin-plan-59c19.web.app`
 - [ ] Fix GitHub Actions deployment (service account needs Firebase Hosting Admin role in Google Cloud IAM)
 
 ### Firestore security rules
-```
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    match /users/{uid} {
-      allow read, write: if request.auth != null && request.auth.uid == uid;
-    }
-  }
-}
-```
+
+The authoritative rules are in [`firestore.rules`](firestore.rules). They scope every read/write to
+the signed-in user's own `/users/{uid}` tree **including all subcollections** (loans, savings,
+spends) via the `/{document=**}` recursive match — don't paste a shorter version here, it would
+leave the subcollections unprotected.
 
 ## Deploy
 Push to `main` — GitHub Actions deploys to Firebase Hosting automatically.

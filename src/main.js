@@ -20,7 +20,7 @@ import {
 } from 'firebase/firestore';
 
 // ── Constants ───────────────────────────────────────────────────────────────
-const CATEGORIES = [
+const DEFAULT_CATEGORIES = [
   { id: 'food',      label: 'Food',      icon: '🍔', color: '#C2410C' },
   { id: 'transport', label: 'Transport', icon: '🚌', color: '#0369A1' },
   { id: 'shopping',  label: 'Shopping',  icon: '🛍', color: '#7C3AED' },
@@ -30,15 +30,35 @@ const CATEGORIES = [
   { id: 'housing',   label: 'Housing',   icon: '🏠', color: '#2B2D77' },
   { id: 'other',     label: 'Other',     icon: '✦',  color: '#566072' },
 ];
-const CAT = Object.fromEntries(CATEGORIES.map((c) => [c.id, c]));
+// The "other" bucket every unknown/deleted category falls back to.
+const OTHER_CAT = DEFAULT_CATEGORIES[DEFAULT_CATEGORIES.length - 1];
+// Categories shown to the user = the 8 built-ins plus any custom ones the user
+// added (stored in S.customCategories, synced like the rest of settings).
+const allCats = () => DEFAULT_CATEGORIES.concat(S.customCategories || []);
+const catMap = () => Object.fromEntries(allCats().map((c) => [c.id, c]));
+// Resolve a category id to its definition; unknown/deleted ids (e.g. a spend
+// whose custom category was later removed) fall back to "Other" so nothing
+// renders blank.
+const catOf = (id) => catMap()[id] || OTHER_CAT;
 const PALETTE = ['#C2410C', '#147A5C', '#2B2D77', '#566072', '#7C3AED', '#B45309', '#0369A1', '#BE185D'];
 const BASE = 2026 * 12 + 5;
+
+// Supported display currencies. Amounts are stored as plain numbers; only the
+// symbol shown differs (no FX conversion — this picks how money is rendered).
+const CURRENCIES = [
+  { code: 'MNT', symbol: '₮' }, { code: 'USD', symbol: '$' }, { code: 'EUR', symbol: '€' },
+  { code: 'GBP', symbol: '£' }, { code: 'JPY', symbol: '¥' }, { code: 'CNY', symbol: '¥' },
+  { code: 'KRW', symbol: '₩' }, { code: 'INR', symbol: '₹' }, { code: 'RUB', symbol: '₽' },
+  { code: 'CAD', symbol: 'C$' }, { code: 'AUD', symbol: 'A$' }, { code: 'SGD', symbol: 'S$' },
+];
+let CUR = CURRENCIES[0];
+const applyCurrency = (code) => { CUR = CURRENCIES.find((c) => c.code === code) || CURRENCIES[0]; };
 
 const KEY = 'finplan_v2';
 const UIDKEY = 'finplan_uid';
 const THEMEKEY = 'finplan_theme';
 const SCHEMA = 2;
-const APP_VERSION = '2.1.0';
+const APP_VERSION = '2.2.0';
 
 let currentUser = null;
 let syncState = 'idle';
@@ -75,7 +95,10 @@ function defaults() {
     cursor: 0,
     startAbs: now.getFullYear() * 12 + now.getMonth() - BASE,
     history: [],
-    catBudgets: {},   // { categoryId: monthly limit }
+    catBudgets: {},        // { categoryId: monthly limit }
+    customCategories: [],  // user-added categories: { id, label, icon, color }
+    recurring: [],         // recurring spend templates: { id, amount, category, note, day }
+    currency: 'MNT',       // display currency code (see CURRENCIES)
   };
 }
 let S = defaults();
@@ -90,6 +113,9 @@ function migrate(s) {
   if (!s.spends) s.spends = [];
   if (!s.history) s.history = [];
   if (!s.catBudgets) s.catBudgets = {};
+  if (!s.customCategories) s.customCategories = [];
+  if (!s.recurring) s.recurring = [];
+  if (!s.currency) s.currency = 'MNT';
   if (s.budget === undefined) s.budget = s.expenses || 0;
   if (s.onboarded === undefined) s.onboarded = !!(s.loanOrder && s.loanOrder.length > 0);
   const typeMap = { toki: 'revolving', inst: 'fixed' };
@@ -132,6 +158,9 @@ function settingsPayload() {
     savingsOrder: S.savingsOrder,
     history: S.history,
     catBudgets: S.catBudgets,
+    customCategories: S.customCategories,
+    recurring: S.recurring,
+    currency: S.currency,
     schema: SCHEMA,
     updatedAt: serverTimestamp(),
   };
@@ -257,6 +286,9 @@ function uploadOps(src) {
     savingsOrder: src.savingsOrder || [],
     history: src.history || [],
     catBudgets: src.catBudgets || {},
+    customCategories: src.customCategories || [],
+    recurring: src.recurring || [],
+    currency: src.currency || 'MNT',
     schema: SCHEMA,
     payload: deleteField(),
     updatedAt: serverTimestamp(),
@@ -310,6 +342,10 @@ function attachListeners() {
     S.savingsOrder = d.savingsOrder || [];
     S.history = d.history || [];
     S.catBudgets = d.catBudgets || {};
+    S.customCategories = d.customCategories || [];
+    S.recurring = d.recurring || [];
+    S.currency = d.currency || 'MNT';
+    applyCurrency(S.currency);
     reconcile();
   }, () => {}));
   unsubs.push(onSnapshot(loansCol(), (snap) => {
@@ -328,6 +364,7 @@ function attachListeners() {
 let view = 'boot';
 function reconcile() {
   persistLocal();
+  applyCurrency(S.currency);
   if (!currentUser) return;
   if (!S.onboarded) {
     if (view !== 'onboarding') { view = 'onboarding'; renderOnboarding(); }
@@ -339,12 +376,12 @@ function reconcile() {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-const fmt = (n) => '₮' + Math.round(n).toLocaleString('en-US');
+const fmt = (n) => CUR.symbol + Math.round(n).toLocaleString('en-US');
 const fmtShort = (n) => {
   n = Math.round(n);
-  return n >= 1e6 ? '₮' + (n / 1e6).toFixed(n % 1e6 ? 1 : 0) + 'M'
-    : n >= 1e3 ? '₮' + (n / 1e3).toFixed(0) + 'k'
-    : '₮' + n.toLocaleString('en-US');
+  return n >= 1e6 ? CUR.symbol + (n / 1e6).toFixed(n % 1e6 ? 1 : 0) + 'M'
+    : n >= 1e3 ? CUR.symbol + (n / 1e3).toFixed(0) + 'k'
+    : CUR.symbol + n.toLocaleString('en-US');
 };
 const monthLabel = (abs) => { const t = BASE + abs; return `${Math.floor(t / 12)}.${String((t % 12) + 1).padStart(2, '0')}`; };
 // Current real calendar month as an absolute index (same basis as startAbs).
@@ -467,7 +504,7 @@ function renderShell() {
     <div class="topbar-wrap">
       <div style="display:flex;align-items:center;gap:8px">
         <div class="title">Fin Plan</div>
-        <span class="sync-dot" id="syncDot"></span>
+        <span class="sync-dot" id="syncDot" role="status" aria-label="Sync status"></span>
       </div>
       <div id="topbar-right"></div>
     </div>
@@ -486,7 +523,7 @@ function renderShell() {
         <span class="tab-icon">💰</span>Savings
       </button>
     </nav>
-    <button class="fab" id="fab" title="Add spending">＋</button>`;
+    <button class="fab" id="fab" title="Add spending" aria-label="Add spending">＋</button>`;
 
   appEl.querySelectorAll('.tab-btn').forEach((btn) => (btn.onclick = () => {
     activeTab = btn.dataset.tab;
@@ -512,6 +549,7 @@ function updateFab() {
   };
   const m = map[activeTab] || map.overview;
   fab.title = m.t;
+  fab.setAttribute('aria-label', m.t);
   fab.onclick = m.fn;
 }
 
@@ -519,9 +557,9 @@ function renderTopbarRight() {
   const el = document.getElementById('topbar-right');
   if (!el) return;
   if (currentUser && currentUser.photoURL) {
-    el.innerHTML = `<img class="avatar" id="settingsBtn" src="${esc(currentUser.photoURL)}" alt="">`;
+    el.innerHTML = `<img class="avatar" id="settingsBtn" src="${esc(currentUser.photoURL)}" alt="Open settings" role="button" tabindex="0">`;
   } else {
-    el.innerHTML = `<button class="iconbtn" id="settingsBtn">⚙</button>`;
+    el.innerHTML = `<button class="iconbtn" id="settingsBtn" aria-label="Settings">⚙</button>`;
   }
   document.getElementById('settingsBtn').onclick = openSettings;
 }
@@ -540,6 +578,7 @@ function updateSyncDot() {
   if (!dot) return;
   dot.className = 'sync-dot' + (syncState === 'syncing' ? ' syncing' : syncState === 'error' ? ' error' : '');
   dot.title = syncState === 'idle' ? 'Synced to cloud' : syncState === 'syncing' ? 'Saving…' : 'Not synced — tap for help';
+  dot.setAttribute('aria-label', dot.title);
   dot.onclick = syncState === 'error'
     ? () => alertDialog('Your changes are saved on this device but could not be saved to the cloud. See the browser console for the exact error.')
     : null;
@@ -553,7 +592,7 @@ function renderOverview(el) {
   const left = S.budget - spent;
   const free = freeCash();
   const cats = byCategory(ym);
-  const topCats = CATEGORIES.filter((c) => cats[c.id]).sort((a, b) => cats[b.id] - cats[a.id]).slice(0, 4);
+  const topCats = allCats().filter((c) => cats[c.id]).sort((a, b) => cats[b.id] - cats[a.id]).slice(0, 4);
   const totalDebt = S.loanOrder.reduce((s, id) => s + (S.loans[id] ? S.loans[id].bal : 0), 0);
   const totalSaved = S.savingsOrder.reduce((s, id) => s + (S.savings[id] ? S.savings[id].current : 0), 0);
   const sim = S.loanOrder.length ? simulateLoans() : null;
@@ -576,6 +615,8 @@ function renderOverview(el) {
     <div class="bar" style="margin-top:12px"><span style="width:${pct}%;background:${barColor}"></span></div>
   </div>`;
 
+  h += recurringBannerHTML(ym);
+
   if (topCats.length) {
     h += `<div style="background:var(--card);border-radius:14px;padding:14px 16px;margin-bottom:12px;box-shadow:var(--shadow)">
       <div style="font-family:'Bricolage Grotesque',sans-serif;font-weight:700;font-size:13px;margin-bottom:8px">Top spending</div>`;
@@ -583,10 +624,10 @@ function renderOverview(el) {
       const amt = cats[c.id] || 0;
       const barW = spent > 0 ? Math.round((amt / spent) * 100) : 0;
       h += `<div class="cat-row">
-        <div class="icon" style="background:${c.color}22">${c.icon}</div>
+        <div class="icon" style="background:${c.color}22">${esc(c.icon)}</div>
         <div style="flex:1">
           <div style="display:flex;justify-content:space-between">
-            <span class="label" style="font-size:12px">${c.label}</span>
+            <span class="label" style="font-size:12px">${esc(c.label)}</span>
             <span style="font-size:12px;font-weight:600;font-variant-numeric:tabular-nums">${fmtShort(amt)}</span>
           </div>
           <div class="cat-bar-wrap" style="margin-top:3px"><span style="width:${barW}%;background:${c.color}"></span></div>
@@ -643,6 +684,7 @@ function renderOverview(el) {
   const goS = document.getElementById('goSavings');
   if (goL) goL.onclick = () => { activeTab = 'loans'; renderShell(); };
   if (goS) goS.onclick = () => { activeTab = 'savings'; renderShell(); };
+  wireRecurringBanner(ym);
 }
 
 function row(label, amount, color) {
@@ -689,6 +731,8 @@ function renderSpending(el) {
     <button id="mn_next" ${isNow ? 'style="opacity:.3;pointer-events:none"' : ''}>›</button>
   </div>`;
 
+  if (isNow) h += recurringBannerHTML(spendMonth);
+
   if (items.length === 0) {
     h += `<div class="empty">No spending in ${monthDisplay(spendMonth)}.<br>Tap ＋ to add an entry.</div>`;
   } else {
@@ -701,14 +745,14 @@ function renderSpending(el) {
       </div>` : ''}
     </div>`;
 
-    const sortedCats = CATEGORIES.filter((c) => cats[c.id]).sort((a, b) => cats[b.id] - cats[a.id]);
+    const sortedCats = allCats().filter((c) => cats[c.id]).sort((a, b) => cats[b.id] - cats[a.id]);
     if (sortedCats.length) {
       h += `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">`;
       for (const c of sortedCats) {
         const b = S.catBudgets[c.id];
         const over = b && cats[c.id] > b;
         h += `<div style="display:flex;align-items:center;gap:5px;background:var(--card);border-radius:20px;padding:5px 10px;font-size:11px;box-shadow:var(--shadow);${over ? 'color:var(--danger)' : ''}">
-          <span>${c.icon}</span><span style="font-weight:600">${fmtShort(cats[c.id])}${b ? ` / ${fmtShort(b)}` : ''}</span>${over ? ' ⚠' : ''}
+          <span>${esc(c.icon)}</span><span style="font-weight:600">${fmtShort(cats[c.id])}${b ? ` / ${fmtShort(b)}` : ''}</span>${over ? ' ⚠' : ''}
         </div>`;
       }
       h += `</div>`;
@@ -725,14 +769,14 @@ function renderSpending(el) {
       const dayLabel = dayKey === todayKey ? 'Today' : dayKey === yesterdayKey ? 'Yesterday' : d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
       h += `<div class="day-group"><div class="day-label">${dayLabel}</div>`;
       for (const sp of byDay[dayKey]) {
-        const c = CAT[sp.category] || CAT.other;
+        const c = catOf(sp.category);
         const note = esc(sp.note);
         const hay = esc(((sp.note || '') + ' ' + c.label).toLowerCase());
         h += `<div class="spend-item" data-spend="${esc(sp.id)}" data-search="${hay}">
-          <div class="cat-icon" style="background:${c.color}22">${c.icon}</div>
+          <div class="cat-icon" style="background:${c.color}22">${esc(c.icon)}</div>
           <div class="info">
-            <div class="name">${note || c.label}</div>
-            <div class="meta">${c.label}${sp.note && sp.note !== c.label ? ' · ' + note : ''}</div>
+            <div class="name">${note || esc(c.label)}</div>
+            <div class="meta">${esc(c.label)}${sp.note && sp.note !== c.label ? ' · ' + note : ''}</div>
           </div>
           <div class="amt">${fmt(sp.amount)}</div>
         </div>`;
@@ -758,6 +802,7 @@ function renderSpending(el) {
       g.style.display = anyVisible ? '' : 'none';
     });
   };
+  if (isNow) wireRecurringBanner(spendMonth);
 }
 
 // ── Loans tab ───────────────────────────────────────────────────────────────
@@ -854,15 +899,15 @@ function renderSavingsTab(el) {
 // ── Add spending sheet ─────────────────────────────────────────────────────────
 function openAddSpend(prefill) {
   let selCat = (prefill && prefill.category) || lastCat;
-  const catGrid = () => CATEGORIES.map((c) => `
-    <div class="cat-pick${selCat === c.id ? ' selected' : ''}" data-cat="${c.id}">
-      <span class="icon">${c.icon}</span>
-      <span class="label">${c.label}</span>
+  const catGrid = () => allCats().map((c) => `
+    <div class="cat-pick${selCat === c.id ? ' selected' : ''}" data-cat="${esc(c.id)}">
+      <span class="icon">${esc(c.icon)}</span>
+      <span class="label">${esc(c.label)}</span>
     </div>`).join('');
 
   scrim.innerHTML = `<div class="sheet">
     <h2>Add spending</h2>
-    <div class="amount-prefix">Amount (₮)</div>
+    <div class="amount-prefix">Amount (${esc(CUR.symbol)})</div>
     <input class="amount-input" id="sp_amount" inputmode="numeric" placeholder="0" autocomplete="off" value="${prefill ? prefill.amount : ''}">
     <div class="cat-grid" id="cat_grid">${catGrid()}</div>
     <label class="set-label">Note (optional)</label>
@@ -889,22 +934,22 @@ function openAddSpend(prefill) {
     lastCat = selCat;
     S.spends.push({ id, ts, month: ym, amount, category: selCat, note });
     persistSpend(id); closeSheet(); renderContent();
-    toast(`Added ${fmt(amount)} · ${(CAT[selCat] || CAT.other).label}`);
+    toast(`Added ${fmt(amount)} · ${catOf(selCat).label}`);
   };
 }
 
 function openEditSpend(id) {
   const sp = S.spends.find((x) => x.id === id); if (!sp) return;
   let selCat = sp.category;
-  const catGrid = () => CATEGORIES.map((c) => `
-    <div class="cat-pick${selCat === c.id ? ' selected' : ''}" data-cat="${c.id}">
-      <span class="icon">${c.icon}</span>
-      <span class="label">${c.label}</span>
+  const catGrid = () => allCats().map((c) => `
+    <div class="cat-pick${selCat === c.id ? ' selected' : ''}" data-cat="${esc(c.id)}">
+      <span class="icon">${esc(c.icon)}</span>
+      <span class="label">${esc(c.label)}</span>
     </div>`).join('');
 
   scrim.innerHTML = `<div class="sheet">
     <h2>Edit spending</h2>
-    <div class="amount-prefix">Amount (₮)</div>
+    <div class="amount-prefix">Amount (${esc(CUR.symbol)})</div>
     <input class="amount-input" id="sp_amount" inputmode="numeric" value="${sp.amount}">
     <div class="cat-grid" id="cat_grid">${catGrid()}</div>
     <label class="set-label">Note (optional)</label>
@@ -1203,6 +1248,216 @@ function openLogLoans() {
   };
 }
 
+// ── Recurring transactions ────────────────────────────────────────────────────
+// Templates for expenses that repeat every month (rent, subscriptions, bills).
+// "Applying" one for a month creates an ordinary spend tagged with rec:<id>, so
+// it appears in the spending list and stays fully editable/deletable afterwards.
+const daysInMonth = (ym) => { const [y, m] = ym.split('-').map(Number); return new Date(y, m, 0).getDate(); };
+
+// Recurring templates not yet added to the given month.
+function pendingRecurring(ym) {
+  return (S.recurring || []).filter((r) => !S.spends.some((sp) => sp.month === ym && sp.rec === r.id));
+}
+
+function applyRecurring(ym) {
+  const pend = pendingRecurring(ym);
+  if (!pend.length) return;
+  const dim = daysInMonth(ym);
+  pend.forEach((r, i) => {
+    const day = Math.min(Math.max(1, r.day || 1), dim);
+    const id = 'sp_' + Date.now() + '_' + i;
+    const ts = new Date(`${ym}-${String(day).padStart(2, '0')}T12:00:00`).getTime();
+    S.spends.push({ id, ts, month: ym, amount: r.amount, category: r.category, note: r.note || '', rec: r.id });
+    persistSpend(id);
+  });
+  renderContent();
+  toast(`Added ${pend.length} recurring ${pend.length === 1 ? 'entry' : 'entries'}`);
+}
+
+// One-tap "Add all" prompt, shown on the current month only.
+function recurringBannerHTML(ym) {
+  const pend = pendingRecurring(ym);
+  if (!pend.length) return '';
+  const sum = pend.reduce((s, r) => s + r.amount, 0);
+  return `<div class="rec-banner">
+    <div><div class="rec-t">🔁 ${pend.length} recurring ${pend.length === 1 ? 'entry' : 'entries'}</div>
+      <div class="rec-s">${fmtShort(sum)} · not added to ${monthDisplay(ym)} yet</div></div>
+    <button class="rec-add" id="recApply">Add all</button>
+  </div>`;
+}
+function wireRecurringBanner(ym) {
+  const btn = document.getElementById('recApply');
+  if (btn) btn.onclick = () => applyRecurring(ym);
+}
+
+function openRecurring() {
+  const list = (S.recurring || []).map((r) => {
+    const c = catOf(r.category);
+    return `<div class="spend-item" data-rec="${esc(r.id)}">
+      <div class="cat-icon" style="background:${c.color}22">${esc(c.icon)}</div>
+      <div class="info"><div class="name">${r.note ? esc(r.note) : esc(c.label)}</div>
+        <div class="meta">${esc(c.label)} · day ${Math.min(31, Math.max(1, r.day || 1))}</div></div>
+      <div class="amt">${fmt(r.amount)}</div>
+    </div>`;
+  }).join('');
+  scrim.innerHTML = `<div class="sheet">
+    <h2>Recurring</h2>
+    <div class="hint">Bills, rent and subscriptions you have every month. Add them once, then tap “Add all” on the Overview or Spending tab each month.</div>
+    ${list || '<div class="empty" style="padding:14px 0">No recurring entries yet.</div>'}
+    <button class="ghost" id="rec_add" style="width:100%;margin-top:6px">＋ Add recurring entry</button>
+    <div class="btnrow"><button class="primary" id="rec_close">Done</button></div>
+  </div>`;
+  scrim.classList.add('open');
+  document.getElementById('rec_close').onclick = openSettings;
+  document.getElementById('rec_add').onclick = () => openRecurringForm(null);
+  scrim.querySelectorAll('[data-rec]').forEach((el) => (el.onclick = () => openRecurringForm(el.dataset.rec)));
+}
+
+function openRecurringForm(editId) {
+  const ex = editId ? (S.recurring || []).find((r) => r.id === editId) : null;
+  let selCat = ex ? ex.category : lastCat;
+  const grid = () => allCats().map((c) => `
+    <div class="cat-pick${selCat === c.id ? ' selected' : ''}" data-cat="${esc(c.id)}">
+      <span class="icon">${esc(c.icon)}</span><span class="label">${esc(c.label)}</span>
+    </div>`).join('');
+  scrim.innerHTML = `<div class="sheet">
+    <h2>${ex ? 'Edit recurring' : 'Add recurring'}</h2>
+    <div class="amount-prefix">Amount (${esc(CUR.symbol)})</div>
+    <input class="amount-input" id="rc_amount" inputmode="numeric" placeholder="0" value="${ex ? ex.amount : ''}">
+    <div class="cat-grid">${grid()}</div>
+    <label class="set-label">Label (optional)</label>
+    <input class="set-input" id="rc_note" placeholder="e.g. Rent, Netflix…" value="${ex ? esc(ex.note || '') : ''}">
+    <label class="set-label">Day of month (1–31)</label>
+    <input class="set-input mono" id="rc_day" inputmode="numeric" maxlength="2" placeholder="1" style="width:120px" value="${ex ? Math.min(31, Math.max(1, ex.day || 1)) : 1}">
+    <div class="btnrow">
+      ${editId ? '<button class="ghost" id="rc_del" style="color:var(--danger)">Delete</button>' : '<button class="ghost" id="rc_cancel">Cancel</button>'}
+      <button class="primary" id="rc_save">${ex ? 'Save' : 'Add'}</button>
+    </div></div>`;
+  scrim.classList.add('open');
+  scrim.querySelectorAll('.cat-pick').forEach((b) => (b.onclick = () => { selCat = b.dataset.cat; scrim.querySelectorAll('.cat-pick').forEach((x) => x.classList.toggle('selected', x.dataset.cat === selCat)); }));
+  const cancel = document.getElementById('rc_cancel'); if (cancel) cancel.onclick = openRecurring;
+  const del = document.getElementById('rc_del');
+  if (del) del.onclick = () => { S.recurring = (S.recurring || []).filter((r) => r.id !== editId); persistSettings(); openRecurring(); };
+  document.getElementById('rc_save').onclick = () => {
+    const amount = parseInt((document.getElementById('rc_amount').value || '').replace(/[^\d]/g, '')) || 0;
+    if (!amount) { toast('Enter an amount.'); return; }
+    const note = (document.getElementById('rc_note').value || '').trim();
+    const day = Math.min(31, Math.max(1, parseInt(document.getElementById('rc_day').value) || 1));
+    if (ex) { ex.amount = amount; ex.category = selCat; ex.note = note; ex.day = day; }
+    else { S.recurring = S.recurring || []; S.recurring.push({ id: 'rec_' + Date.now(), amount, category: selCat, note, day }); }
+    persistSettings(); openRecurring();
+  };
+}
+
+// ── Categories manager (custom categories + per-category budgets) ──────────────
+function openCategories() {
+  const rows = allCats().map((c) => {
+    const custom = (S.customCategories || []).some((x) => x.id === c.id);
+    const bud = S.catBudgets[c.id] || '';
+    return `<div class="catbud-row">
+      <span class="lbl">${esc(c.icon)} ${esc(c.label)}</span>
+      <span style="display:flex;align-items:center;gap:6px">
+        <input class="set-input mono" data-bud="${esc(c.id)}" inputmode="numeric" placeholder="no limit" value="${bud ? Math.round(bud).toLocaleString('en-US') : ''}">
+        ${custom ? `<button class="iconbtn cat-del" data-del="${esc(c.id)}" aria-label="Delete category" style="width:30px;height:30px;font-size:16px;color:var(--danger)">×</button>` : ''}
+      </span>
+    </div>`;
+  }).join('');
+  scrim.innerHTML = `<div class="sheet">
+    <h2>Categories</h2>
+    <div class="hint">Set an optional monthly budget per category (shown on the Spending tab). Add your own categories below.</div>
+    ${rows}
+    <div class="divider"></div>
+    <label class="set-label">New category name</label>
+    <input class="set-input" id="cc_name" placeholder="e.g. Pets, Kids, Subscriptions">
+    <div class="two" style="margin-top:9px">
+      <div><label class="set-label">Emoji / icon</label>
+        <input class="set-input" id="cc_icon" placeholder="🏷" maxlength="2"></div>
+      <div><label class="set-label">Color</label>
+        <div class="color-row" id="cc_colors">${PALETTE.map((p, i) => `<button class="swatch${i === 0 ? ' sel' : ''}" data-color="${p}" style="background:${p}" aria-label="Pick color ${i + 1}"></button>`).join('')}</div></div>
+    </div>
+    <button class="ghost" id="cc_add" style="width:100%;margin-top:12px">＋ Add category</button>
+    <div class="btnrow"><button class="primary" id="cc_done">Done</button></div>
+  </div>`;
+  scrim.classList.add('open');
+  let selColor = PALETTE[0];
+  scrim.querySelectorAll('#cc_colors .swatch').forEach((b) => (b.onclick = () => { selColor = b.dataset.color; scrim.querySelectorAll('#cc_colors .swatch').forEach((x) => x.classList.toggle('sel', x === b)); }));
+  // Read every budget input into state (called before any re-render so edits stick).
+  const saveBudgets = () => {
+    scrim.querySelectorAll('[data-bud]').forEach((inp) => {
+      const id = inp.getAttribute('data-bud');
+      const v = parseInt((inp.value || '').replace(/[^\d]/g, '')) || 0;
+      if (v > 0) S.catBudgets[id] = v; else delete S.catBudgets[id];
+    });
+  };
+  scrim.querySelectorAll('.cat-del').forEach((b) => (b.onclick = async () => {
+    const id = b.getAttribute('data-del');
+    const c = catOf(id);
+    if (!(await confirmDialog(`Delete the “${c.label}” category? Existing entries keep their amounts but show as “Other”.`, { okText: 'Delete', danger: true }))) return;
+    saveBudgets();
+    S.customCategories = (S.customCategories || []).filter((x) => x.id !== id);
+    delete S.catBudgets[id];
+    persistSettings(); openCategories();
+  }));
+  document.getElementById('cc_add').onclick = () => {
+    const name = (document.getElementById('cc_name').value || '').trim();
+    if (!name) { toast('Enter a category name.'); return; }
+    const icon = (document.getElementById('cc_icon').value || '').trim() || '🏷';
+    saveBudgets();
+    S.customCategories = S.customCategories || [];
+    S.customCategories.push({ id: 'cat_' + Date.now(), label: name, icon, color: selColor });
+    persistSettings(); openCategories();
+  };
+  document.getElementById('cc_done').onclick = () => { saveBudgets(); persistSettings(); openSettings(); };
+}
+
+// ── Import backup ──────────────────────────────────────────────────────────────
+// Replaces all data on this account with the contents of an exported JSON file.
+// Deletes only the cloud docs the import doesn't re-create, then uploads the new
+// set (mirrors resetAll, but seeds from the file instead of defaults).
+function importReplace(next) {
+  const newLoanIds = new Set(Object.keys(next.loans || {}));
+  const newSavIds = new Set(Object.keys(next.savings || {}));
+  const newSpendIds = new Set((next.spends || []).map((s) => s.id));
+  const staleLoan = Object.keys(S.loans || {}).filter((id) => !newLoanIds.has(id));
+  const staleSav = Object.keys(S.savings || {}).filter((id) => !newSavIds.has(id));
+  const staleSpend = (S.spends || []).map((s) => s.id).filter((id) => !newSpendIds.has(id));
+  S = next; persistLocal();
+  if (!canWrite()) return;
+  const ops = [];
+  staleLoan.forEach((id) => ops.push((b) => b.delete(loanDoc(id))));
+  staleSav.forEach((id) => ops.push((b) => b.delete(savDoc(id))));
+  staleSpend.forEach((id) => ops.push((b) => b.delete(spendDoc(id))));
+  uploadOps(next).forEach((fn) => ops.push(fn));
+  trackSync(runChunked(ops));
+}
+
+function importData() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'application/json,.json';
+  input.onchange = async () => {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    let parsed;
+    try { parsed = JSON.parse(await file.text()); }
+    catch (e) { alertDialog('That file isn’t valid JSON.'); return; }
+    const looksValid = parsed && typeof parsed === 'object' &&
+      ('spends' in parsed || 'loans' in parsed || 'savings' in parsed || 'income' in parsed);
+    if (!looksValid) { alertDialog('That doesn’t look like a Fin Plan backup.'); return; }
+    if (!(await confirmDialog('Import will REPLACE all current data on this account with the backup. This cannot be undone. Continue?', { okText: 'Import', danger: true }))) return;
+    const next = migrate(parsed);
+    next.onboarded = true;
+    importReplace(next);
+    applyCurrency(S.currency);
+    closeSheet();
+    activeTab = 'overview';
+    view = 'shell';
+    renderShell();
+    toast('Backup imported');
+  };
+  input.click();
+}
+
 // ── Settings ───────────────────────────────────────────────────────────────
 function openSettings() {
   let h = `<div class="sheet"><h2>Settings</h2>`;
@@ -1218,7 +1473,14 @@ function openSettings() {
   <div style="font-size:11px;color:var(--soft);margin:4px 0 10px">Your take-home pay per month.</div>
   <label class="set-label">Monthly spending budget</label>
   <input class="set-input mono" id="s_budget" inputmode="numeric" placeholder="0" value="${S.budget ? S.budget.toLocaleString('en-US') : ''}">
-  <div style="font-size:11px;color:var(--soft);margin:4px 0 2px">How much you aim to spend on everyday living each month (food, transport, fun…). Loan payments and savings are tracked separately. The Overview compares your actual spending against this.</div>
+  <div style="font-size:11px;color:var(--soft);margin:4px 0 10px">How much you aim to spend on everyday living each month (food, transport, fun…). Loan payments and savings are tracked separately. The Overview compares your actual spending against this.</div>
+  <label class="set-label">Currency</label>
+  <select class="set-input" id="s_currency">${CURRENCIES.map((c) => `<option value="${c.code}"${S.currency === c.code ? ' selected' : ''}>${c.code} (${c.symbol})</option>`).join('')}</select>
+  <div class="divider"></div>
+  <div class="btnrow" style="margin-top:0">
+    <button class="ghost" id="catsBtn">🏷 Categories</button>
+    <button class="ghost" id="recBtn">🔁 Recurring</button>
+  </div>
   <div class="divider"></div>
   <div class="row-space" style="margin-bottom:4px">
     <span style="font-family:'Bricolage Grotesque',sans-serif;font-weight:700">Dark mode</span>
@@ -1226,7 +1488,8 @@ function openSettings() {
   </div>
   <div class="divider"></div>
   <div class="btnrow">
-    <button class="ghost" id="exportBtn">⬇ Export backup</button>
+    <button class="ghost" id="exportBtn">⬇ Export</button>
+    <button class="ghost" id="importBtn">⬆ Import</button>
   </div>
   <div class="btnrow">
     <button class="ghost" id="resetBtn" style="color:var(--danger)">Reset all</button>
@@ -1246,10 +1509,15 @@ function openSettings() {
     themeToggle.setAttribute('aria-checked', next === 'dark');
   };
   document.getElementById('exportBtn').onclick = exportData;
+  document.getElementById('importBtn').onclick = importData;
+  document.getElementById('catsBtn').onclick = openCategories;
+  document.getElementById('recBtn').onclick = openRecurring;
   document.getElementById('resetBtn').onclick = async () => { if (await confirmDialog('Erase everything? This cannot be undone.', { okText: 'Erase', danger: true })) { resetAll(); closeSheet(); view = 'onboarding'; renderOnboarding(); } };
   const gi = (id) => parseInt((document.getElementById(id).value || '').replace(/[^\d]/g, '')) || 0;
   document.getElementById('saveSet').onclick = () => {
     S.income = gi('s_income'); S.budget = gi('s_budget');
+    S.currency = document.getElementById('s_currency').value || 'MNT';
+    applyCurrency(S.currency);
     persistSettings(); closeSheet(); renderContent(); toast('Settings saved');
   };
 }
@@ -1360,6 +1628,7 @@ let booted = false;
 // Render the app view from current state. Assumes a signed-in user — used by the
 // optimistic boot (before auth resolves) and after auth confirms.
 function renderView() {
+  applyCurrency(S.currency);
   if (!S.onboarded) { view = 'onboarding'; renderOnboarding(); }
   else { view = 'shell'; renderShell(); }
   booted = true;

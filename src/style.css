@@ -17,6 +17,7 @@
 [data-theme="dark"] .primary,
 [data-theme="dark"] .toast,
 [data-theme="dark"] .modal-box .primary,
+[data-theme="dark"] .rec-add,
 [data-theme="dark"] .chip:active,
 [data-theme="dark"] .cat-pick.selected{background:#3A4150}
 *{box-sizing:border-box;margin:0;padding:0}
@@ -228,3 +229,15 @@ select.set-input{appearance:auto;-webkit-appearance:auto;cursor:pointer}
 .catbud-row{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:7px;font-size:13px}
 .catbud-row .lbl{display:flex;align-items:center;gap:7px}
 .catbud-row input{width:120px}
+
+/* ── Color swatches (custom category picker) ── */
+.color-row{display:flex;flex-wrap:wrap;gap:7px;margin-top:5px}
+.swatch{width:28px;height:28px;border-radius:50%;border:2px solid transparent;cursor:pointer;padding:0}
+.swatch.sel{border-color:var(--ink);box-shadow:0 0 0 2px var(--card) inset}
+
+/* ── Recurring banner ── */
+.rec-banner{display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--card);border:1px dashed var(--rule);border-radius:14px;padding:12px 14px;margin-bottom:12px;box-shadow:var(--shadow)}
+.rec-banner .rec-t{font-family:'Bricolage Grotesque',sans-serif;font-weight:700;font-size:13px}
+.rec-banner .rec-s{font-size:11px;color:var(--soft);margin-top:2px}
+.rec-add{background:var(--ink);color:#fff;border-radius:10px;padding:9px 15px;font-size:12px;font-weight:600;font-family:'Bricolage Grotesque',sans-serif;flex-shrink:0;transition:transform .08s}
+.rec-add:active{transform:scale(.96)}
