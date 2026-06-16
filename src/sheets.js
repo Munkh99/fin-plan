@@ -6,13 +6,13 @@
 import { esc, CURRENCIES, APP_VERSION, PALETTE, ACCOUNT_TYPES, ACCOUNT_TYPE_MAP } from './constants.js';
 import {
   S, setS, fmt, fmtShort, allCats, catOf, CUR, todayStr, dateStrFromTs, ord, lc, sc, ac, acctIcon,
-  monthLabel, nowAbs, simulateLoans, plannedLoans, cloneLoans, caughtUpOnLoans,
+  monthLabel, nowAbs, simulateLoans, plannedLoans, cloneLoans,
   getInt, nextColor, savMonthsToGoal, totalAccounts, migrate, persistLocal, applyCurrency,
 } from './state.js';
 import {
   persistSpend, persistSpendDelete, persistLoan, persistSav, addLoan, addSav,
   deleteLoanFull, deleteSavFull, persistAcc, addAcc, deleteAccFull,
-  persistMonthChange, persistSettings, resetAll,
+  persistSettings, resetAll,
   uploadOps, loanDoc, savDoc, spendDoc, canWrite, runChunked, trackSync,
   currentUser, syncState,
 } from './store.js';
@@ -137,16 +137,23 @@ function drawChart(actual, projected, color) {
 
 export function openLoanDetail(id) {
   const l = S.loans[id]; if (!l) return;
+  const log = l.paidLog || [];
+  const done = l.bal <= 0.5;
+  // Actual balance trajectory: original → each logged payment's after-balance →
+  // current. No global month cursor; built straight from this loan's own log.
   const actual = [];
-  for (let k = 0; k < S.cursor; k++) { const hi = S.history[k]; if (hi && hi.prev && typeof hi.prev[id] === 'number') actual.push({ abs: S.startAbs + k, bal: hi.prev[id] }); }
-  actual.push({ abs: S.startAbs + S.cursor, bal: l.bal });
+  if (l.orig != null && l.orig !== l.bal) actual.push({ abs: (log[0] ? log[0].abs : nowAbs()) - 1, bal: l.orig });
+  for (const e of log) actual.push({ abs: e.abs, bal: e.bal });
+  if (!actual.length || actual[actual.length - 1].bal !== l.bal) actual.push({ abs: nowAbs(), bal: l.bal });
   const sim = simulateLoans();
   const projected = sim.snaps.map((sn) => ({ abs: sn.abs, bal: sn.bals[id] || 0 }));
+  // Stats combine any pre-migration combined-log history with new per-loan logs.
   let intPaid = 0, paysMade = 0;
-  for (let k = 0; k < S.cursor; k++) { const hi = S.history[k]; if (!hi) continue; intPaid += ((hi.prev && hi.prev[id]) || 0) * l.rate; if (hi.pays && hi.pays[id] > 0) paysMade++; }
+  for (let k = 0; k < (S.cursor || 0); k++) { const hi = S.history[k]; if (!hi) continue; intPaid += ((hi.prev && hi.prev[id]) || 0) * l.rate; if (hi.pays && hi.pays[id] > 0) paysMade++; }
+  for (const e of log) { intPaid += (e.prevBal || 0) * l.rate; if (e.paid > 0) paysMade++; }
   const pct = l.orig > 0 ? Math.round((1 - l.bal / l.orig) * 100) : 0;
   const hit = projected.find((p) => p.bal <= 0.5);
-  const gone = l.bal <= 0.5 ? 'Paid off' : hit ? monthLabel(hit.abs) : '—';
+  const gone = done ? 'Paid off' : hit ? monthLabel(hit.abs) : '—';
   const color = lc(id);
   scrim.innerHTML = `<div class="sheet">
     <h2><span class="dot" style="background:${color};width:12px;height:12px;border-radius:50%"></span>${esc(l.name)}</h2>
@@ -161,6 +168,8 @@ export function openLoanDetail(id) {
       <div><div class="k">Payments made</div><div class="v mono">${paysMade}</div></div>
       <div><div class="k">Gone by</div><div class="v mono">${gone}</div></div>
     </div>
+    ${done ? '' : `<button class="primary" id="logPay" style="width:100%;margin-bottom:10px">＋ Log a payment</button>`}
+    ${log.length ? `<button class="ghost" id="undoPay" style="width:100%;margin-bottom:10px;color:var(--danger)">↩ Undo last payment</button>` : ''}
     <div class="btnrow">
       <button class="ghost" id="editLoan">Edit</button>
       <button class="primary" id="closeDet">Close</button>
@@ -168,6 +177,51 @@ export function openLoanDetail(id) {
   scrim.classList.add('open');
   document.getElementById('closeDet').onclick = closeSheet;
   document.getElementById('editLoan').onclick = () => { closeSheet(); openLoanForm(id, renderContent); };
+  const logPay = document.getElementById('logPay');
+  if (logPay) logPay.onclick = () => openLoanLog(id);
+  const undoPay = document.getElementById('undoPay');
+  if (undoPay) undoPay.onclick = async () => {
+    if (!(await confirmDialog('Undo the most recent logged payment for this loan?', { okText: 'Undo' }))) return;
+    const last = l.paidLog.pop();
+    if (last) l.bal = last.prevBal;
+    persistLoan(id); renderContent(); openLoanDetail(id);
+  };
+}
+
+// Per-loan payment logging: applies one month's interest + the entered payment,
+// records it in the loan's own history, and re-opens the detail to show it.
+function openLoanLog(id) {
+  const l = S.loans[id]; if (!l || l.bal <= 0.5) return;
+  const planned = Math.round(plannedLoans(cloneLoans())[id] || 0);
+  const interest = Math.round(l.bal * l.rate);
+  scrim.innerHTML = `<div class="sheet">
+    <h2>Log payment</h2>
+    <div class="hint"><span class="dot" style="background:${lc(id)};display:inline-block;width:9px;height:9px;border-radius:50%"></span> ${esc(l.name)} · balance ${fmt(l.bal)}</div>
+    <div class="amount-prefix">Amount (${esc(CUR.symbol)})</div>
+    <input class="amount-input" id="lp_amount" inputmode="numeric" value="${planned.toLocaleString('en-US')}">
+    <div class="quick" style="justify-content:center">
+      <span class="chip" data-v="${planned}">Planned ${fmtShort(planned)}</span>
+      <span class="chip" data-v="${interest}">Interest only ${fmtShort(interest)}</span>
+    </div>
+    <div class="btnrow">
+      <button class="ghost" id="lp_cancel">Cancel</button>
+      <button class="primary" id="lp_save">Log payment</button>
+    </div></div>`;
+  scrim.classList.add('open');
+  document.getElementById('lp_amount').focus();
+  scrim.querySelectorAll('.chip').forEach((c) => (c.onclick = () => { document.getElementById('lp_amount').value = Number(c.dataset.v).toLocaleString('en-US'); }));
+  document.getElementById('lp_cancel').onclick = () => openLoanDetail(id);
+  document.getElementById('lp_save').onclick = () => {
+    const paid = parseInt((document.getElementById('lp_amount').value || '').replace(/[^\d]/g, '')) || 0;
+    const prevBal = l.bal;
+    const bal = Math.max(0, l.bal * (1 + l.rate) - paid);
+    l.paidLog = l.paidLog || [];
+    l.paidLog.push({ abs: nowAbs(), paid, prevBal, bal });
+    l.bal = bal;
+    persistLoan(id); renderContent();
+    toast(`Logged ${fmt(paid)} · ${l.name}`);
+    openLoanDetail(id);
+  };
 }
 
 // ── Savings detail ──────────────────────────────────────────────────────────
@@ -177,6 +231,7 @@ export function openSavDetail(id) {
   const prog = sv.target > 0 ? Math.min(100, (sv.current / sv.target) * 100) : 0;
   const months = savMonthsToGoal(id);
   const color = sc(id);
+  const hasLog = (sv.contribLog || []).length > 0;
   scrim.innerHTML = `<div class="sheet">
     <h2><span class="dot" style="background:${color};width:12px;height:12px;border-radius:50%"></span>${esc(sv.name)}</h2>
     <div class="hint">${done ? 'Goal reached!' : 'Saving ' + fmtShort(sv.monthly) + '/month'}</div>
@@ -192,8 +247,10 @@ export function openSavDetail(id) {
       <div><div class="k">Saved</div><div class="v mono">${fmt(sv.current)}</div></div>
       <div><div class="k">Remaining</div><div class="v mono">${fmt(Math.max(0, sv.target - sv.current))}</div></div>
       <div><div class="k">Monthly</div><div class="v mono">${fmt(sv.monthly)}</div></div>
-      <div><div class="k">Reach by</div><div class="v mono">${done ? '✓ Done' : months !== null ? monthLabel(S.startAbs + S.cursor + months) : '—'}</div></div>
+      <div><div class="k">Reach by</div><div class="v mono">${done ? '✓ Done' : months !== null ? monthLabel(nowAbs() + months) : '—'}</div></div>
     </div>
+    ${done ? '' : `<button class="primary" id="logContrib" style="width:100%;margin-bottom:10px">＋ Log a contribution</button>`}
+    ${hasLog ? `<button class="ghost" id="undoContrib" style="width:100%;margin-bottom:10px;color:var(--danger)">↩ Undo last contribution</button>` : ''}
     <div class="btnrow">
       <button class="ghost" id="editSav">Edit</button>
       <button class="primary" id="closeSav">Close</button>
@@ -201,6 +258,47 @@ export function openSavDetail(id) {
   scrim.classList.add('open');
   document.getElementById('closeSav').onclick = closeSheet;
   document.getElementById('editSav').onclick = () => { closeSheet(); openSavingsForm(id, renderContent); };
+  const logC = document.getElementById('logContrib');
+  if (logC) logC.onclick = () => openSavLog(id);
+  const undoC = document.getElementById('undoContrib');
+  if (undoC) undoC.onclick = async () => {
+    if (!(await confirmDialog('Undo the most recent logged contribution?', { okText: 'Undo' }))) return;
+    const last = sv.contribLog.pop();
+    if (last) sv.current = Math.max(0, sv.current - last.amount);
+    persistSav(id); renderContent(); openSavDetail(id);
+  };
+}
+
+// Per-goal contribution logging: adds to the saved amount (capped at target) and
+// records it on the goal's own log, then re-opens the detail.
+function openSavLog(id) {
+  const sv = S.savings[id]; if (!sv || sv.current >= sv.target) return;
+  const planned = Math.round(sv.monthly || 0);
+  scrim.innerHTML = `<div class="sheet">
+    <h2>Log contribution</h2>
+    <div class="hint"><span class="dot" style="background:${sc(id)};display:inline-block;width:9px;height:9px;border-radius:50%"></span> ${esc(sv.name)} · ${fmt(sv.current)} of ${fmt(sv.target)}</div>
+    <div class="amount-prefix">Amount (${esc(CUR.symbol)})</div>
+    <input class="amount-input" id="cn_amount" inputmode="numeric" value="${planned ? planned.toLocaleString('en-US') : ''}" placeholder="0">
+    ${planned ? `<div class="quick" style="justify-content:center"><span class="chip" data-v="${planned}">Planned ${fmtShort(planned)}</span></div>` : ''}
+    <div class="btnrow">
+      <button class="ghost" id="cn_cancel">Cancel</button>
+      <button class="primary" id="cn_save">Log contribution</button>
+    </div></div>`;
+  scrim.classList.add('open');
+  document.getElementById('cn_amount').focus();
+  scrim.querySelectorAll('.chip').forEach((c) => (c.onclick = () => { document.getElementById('cn_amount').value = Number(c.dataset.v).toLocaleString('en-US'); }));
+  document.getElementById('cn_cancel').onclick = () => openSavDetail(id);
+  document.getElementById('cn_save').onclick = () => {
+    const amount = parseInt((document.getElementById('cn_amount').value || '').replace(/[^\d]/g, '')) || 0;
+    if (!amount) { toast('Enter an amount.'); return; }
+    const prev = sv.current;
+    sv.current = Math.min(sv.target, sv.current + amount);
+    sv.contribLog = sv.contribLog || [];
+    sv.contribLog.push({ abs: nowAbs(), amount: sv.current - prev, prev });
+    persistSav(id); renderContent();
+    toast(`Logged ${fmt(sv.current - prev)} · ${sv.name}`);
+    openSavDetail(id);
+  };
 }
 
 // ── Loan form ───────────────────────────────────────────────────────────────
@@ -256,7 +354,7 @@ export function openLoanForm(editId, onDone) {
       persistLoan(editId);
     } else {
       const id = 'loan_' + Date.now();
-      S.loans[id] = { name, bal, orig: bal, rate: rate / 100, type, plan, payDay, color: nextColor(S.loanOrder) };
+      S.loans[id] = { name, bal, orig: bal, rate: rate / 100, type, plan, payDay, color: nextColor(S.loanOrder), paidLog: [] };
       S.loanOrder.push(id);
       addLoan(id);
     }
@@ -301,75 +399,11 @@ export function openSavingsForm(editId, onDone) {
       persistSav(editId);
     } else {
       const id = 'sav_' + Date.now();
-      S.savings[id] = { name, current, target, monthly, color: nextColor(S.savingsOrder) };
+      S.savings[id] = { name, current, target, monthly, color: nextColor(S.savingsOrder), contribLog: [] };
       S.savingsOrder.push(id);
       addSav(id);
     }
     closeSheet(); if (onDone) onDone();
-  };
-}
-
-// ── Log loan payments ─────────────────────────────────────────────────────────
-export function openLogLoans() {
-  if (caughtUpOnLoans()) { toast(`All caught up — come back next month to log ${monthLabel(nowAbs() + 1)}.`); return; }
-  const plan = plannedLoans(cloneLoans());
-  const cur = monthLabel(S.startAbs + S.cursor);
-  let h = `<div class="sheet"><h2>Log ${cur}</h2>
-    <div class="hint">Enter actual payments made this month.</div>`;
-  for (const id of S.loanOrder) {
-    const l = S.loans[id]; if (!l || l.bal <= 0.5) continue;
-    const planned = Math.round(plan[id] || 0), interest = Math.round(l.bal * l.rate);
-    h += `<div class="field" style="--ac:${lc(id)}">
-      <div class="flabel">
-        <div class="fn"><span class="dot" style="background:${lc(id)}"></span>${esc(l.name)}${l.payDay ? ` <span style="font-size:10px;color:var(--faint)">due ${ord(l.payDay)}</span>` : ''}</div>
-        <div class="fmeta mono">bal ${fmt(l.bal)}</div></div>
-      <input id="in_${esc(id)}" inputmode="numeric" value="${planned.toLocaleString('en-US')}">
-      <div class="quick">
-        <span class="chip" data-set="${esc(id)}" data-v="${planned}">Planned ${fmtShort(planned)}</span>
-        <span class="chip" data-set="${esc(id)}" data-v="${interest}">Interest only ${fmtShort(interest)}</span>
-        <span class="chip" data-set="${esc(id)}" data-v="0">Skip</span></div></div>`;
-  }
-  for (const id of S.savingsOrder) {
-    const sv = S.savings[id]; if (!sv || sv.current >= sv.target) continue;
-    h += `<div class="field" style="--ac:${sc(id)}">
-      <div class="flabel">
-        <div class="fn"><span class="dot" style="background:${sc(id)}"></span>${esc(sv.name)}</div>
-        <div class="fmeta mono">${fmt(sv.current)} saved</div></div>
-      <input id="in_${esc(id)}" inputmode="numeric" value="${Math.round(sv.monthly).toLocaleString('en-US')}">
-      <div class="quick">
-        <span class="chip" data-set="${esc(id)}" data-v="${sv.monthly}">Planned ${fmtShort(sv.monthly)}</span>
-        <span class="chip" data-set="${esc(id)}" data-v="0">Skip</span></div></div>`;
-  }
-  h += `<div class="btnrow">
-    <button class="ghost" id="cancelLog">Cancel</button>
-    <button class="primary" id="saveLog">Save &amp; advance</button>
-  </div></div>`;
-  scrim.innerHTML = h; scrim.classList.add('open');
-  scrim.querySelectorAll('.chip').forEach((c) => (c.onclick = () => { const el = document.getElementById('in_' + c.dataset.set); if (el) el.value = Number(c.dataset.v).toLocaleString('en-US'); }));
-  scrim.querySelectorAll('.field input').forEach((inp) => {
-    inp.onblur = () => { const n = parseInt(inp.value.replace(/[^\d]/g, '')) || 0; inp.value = n.toLocaleString('en-US'); };
-    inp.onfocus = () => { inp.value = inp.value.replace(/[^\d]/g, ''); };
-  });
-  document.getElementById('cancelLog').onclick = closeSheet;
-  document.getElementById('saveLog').onclick = () => {
-    const prev = {}, pays = {};
-    for (const id of S.loanOrder) {
-      const l = S.loans[id]; if (!l) { pays[id] = 0; continue; }
-      prev[id] = l.bal; if (l.bal <= 0.5) { pays[id] = 0; continue; }
-      const inp = document.getElementById('in_' + id);
-      const pay = inp ? (parseInt(inp.value.replace(/[^\d]/g, '')) || 0) : 0;
-      pays[id] = pay; l.bal = Math.max(0, l.bal * (1 + l.rate) - pay);
-    }
-    const savPays = {};
-    for (const id of S.savingsOrder) {
-      const sv = S.savings[id]; if (!sv || sv.current >= sv.target) continue;
-      const inp = document.getElementById('in_' + id);
-      const contrib = inp ? (parseInt(inp.value.replace(/[^\d]/g, '')) || 0) : 0;
-      savPays[id] = contrib; sv.current = Math.min(sv.target, sv.current + contrib);
-    }
-    S.history.push({ month: cur, pays, prev, savPays });
-    S.cursor++;
-    persistMonthChange(); closeSheet(); renderContent();
   };
 }
 
@@ -623,16 +657,6 @@ function exportData() {
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1500);
   } catch (e) { toast('Export failed.'); }
-}
-
-// ── Undo (last logged month) ────────────────────────────────────────────────────
-export function undo() {
-  if (!S.history.length) return;
-  const last = S.history.pop();
-  for (const id in last.prev) { if (S.loans[id]) S.loans[id].bal = last.prev[id]; }
-  if (last.savPays) { for (const id in last.savPays) { if (S.savings[id]) S.savings[id].current = Math.max(0, S.savings[id].current - last.savPays[id]); } }
-  S.cursor = Math.max(0, S.cursor - 1);
-  persistMonthChange(); renderContent();
 }
 
 // ── Settings ───────────────────────────────────────────────────────────────

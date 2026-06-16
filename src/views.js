@@ -5,8 +5,8 @@
 
 import { esc } from './constants.js';
 import {
-  S, fmt, fmtShort, allCats, catOf, monthDisplay, nowMonth, monthLabel, nowAbs,
-  loanMonthAbs, caughtUpOnLoans, lc, sc, ac, acctIcon, ord, prevMonth, nextMonthStr,
+  S, fmt, fmtShort, allCats, catOf, monthDisplay, nowMonth, monthLabel,
+  lc, sc, ac, acctIcon, ord, prevMonth, nextMonthStr,
   simulateLoans, plannedLoans, cloneLoans, freeCash, totalSavingsContrib,
   byCategory, totalForMonth, spendsForMonth, lastMonthsTotals, savMonthsToGoal,
   totalAccounts, pendingRecurring, daysInMonth, applyCurrency, persistLocal,
@@ -15,8 +15,8 @@ import { currentUser, syncState, persistSpend } from './store.js';
 import { appEl, V, toast, alertDialog } from './dom.js';
 import {
   openAddSpend, openEditSpend, openLoanForm, openSavingsForm, openLoanDetail,
-  openSavDetail, openLogLoans, openSettings, openRecurring, openAccounts, openAccountForm,
-  undo, renderOnboarding, renderLogin,
+  openSavDetail, openSettings, openRecurring, openAccounts, openAccountForm,
+  renderOnboarding, renderLogin,
 } from './sheets.js';
 
 // ── Shell ───────────────────────────────────────────────────────────────────
@@ -387,19 +387,10 @@ function renderLoans(el) {
         <div class="lprog"><span style="width:${prog}%"></span></div>` : ''}
       </div>`;
     }
-    h += `<div class="btnrow" style="margin-top:4px">
-      ${caughtUpOnLoans()
-        ? `<div class="empty" style="flex:1;padding:11px;margin:0">✓ Logged through ${monthLabel(nowAbs())}</div>`
-        : `<button class="ghost" id="logLoansBtn">📋 Log ${monthLabel(loanMonthAbs())} payments</button>`}
-      ${S.cursor > 0 ? '<button class="ghost" id="undoBtn" style="flex:0 0 auto">↩</button>' : ''}
-    </div>`;
+    h += `<div class="empty" style="padding:10px 0 0">Tap a loan to see its detail and log a payment.</div>`;
   }
   el.innerHTML = h;
   el.querySelectorAll('[data-loan]').forEach((e) => (e.onclick = () => openLoanDetail(e.dataset.loan)));
-  const logBtn = document.getElementById('logLoansBtn');
-  if (logBtn) logBtn.onclick = openLogLoans;
-  const undoBtn = document.getElementById('undoBtn');
-  if (undoBtn) undoBtn.onclick = undo;
 }
 
 // ── Savings tab ───────────────────────────────────────────────────────────────

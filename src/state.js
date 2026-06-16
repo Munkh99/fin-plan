@@ -56,6 +56,11 @@ export function migrate(s) {
     if (typeMap[l.type]) l.type = typeMap[l.type];
     if (!l.color) l.color = PALETTE[(s.loanOrder || []).indexOf(id) % PALETTE.length];
     if (!l.orig && l.bal) l.orig = l.bal;
+    if (!l.paidLog) l.paidLog = [];   // per-loan payment history: { abs, paid, prevBal, bal }
+  }
+  for (const id of s.savingsOrder || []) {
+    const sv = s.savings && s.savings[id];
+    if (sv && !sv.contribLog) sv.contribLog = []; // per-goal contributions: { abs, amount, prev }
   }
   return s;
 }
@@ -134,7 +139,9 @@ export const cloneLoans = () => F.cloneLoans(S);
 export const plannedLoans = (L) => F.plannedLoans(S, L);
 export const totalSavingsContrib = () => F.totalSavingsContrib(S);
 export const freeCash = () => F.freeCash(S);
-export const simulateLoans = () => F.simulateLoans(S);
+// Project from the current calendar month. Payments are now logged per-loan
+// (no global month cursor), so the projection always starts "this month".
+export const simulateLoans = () => F.simulateLoans({ ...S, cursor: Math.max(0, nowAbs() - S.startAbs) });
 export const savMonthsToGoal = (id) => F.savMonthsToGoal(S, id);
 
 // Totals across the entity collections. Net worth = liquid accounts + money set
