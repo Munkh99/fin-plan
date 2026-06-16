@@ -9,13 +9,13 @@ import {
   lc, sc, ac, acctIcon, ord, prevMonth, nextMonthStr,
   simulateLoans, plannedLoans, cloneLoans, freeCash, totalSavingsContrib,
   byCategory, totalForMonth, spendsForMonth, lastMonthsTotals, savMonthsToGoal,
-  totalAccounts, avgPrevSpend, pendingRecurring, daysInMonth, adjustAccount, applyCurrency, persistLocal,
+  totalAccounts, avgPrevSpend, applyCurrency, persistLocal,
 } from './state.js';
-import { currentUser, syncState, persistSpend, persistAcc, persistSettings } from './store.js';
+import { currentUser, syncState } from './store.js';
 import { appEl, V, toast, alertDialog } from './dom.js';
 import {
   openAddSpend, openEditSpend, openLoanForm, openSavingsForm, openLoanDetail,
-  openSavDetail, openSettings, openRecurring, openAccounts, openAccountForm,
+  openSavDetail, openSettings, openAccounts, openAccountForm,
   renderOnboarding, renderLogin,
 } from './sheets.js';
 
@@ -149,8 +149,6 @@ function renderOverview(el) {
     h += `<div class="alert-card warn">Approaching budget — ${fmtShort(left)} left</div>`;
   }
 
-  h += recurringBannerHTML(ym);
-
   if (topCats.length) {
     h += `<div style="background:var(--card);border-radius:14px;padding:14px 16px;margin-bottom:12px;box-shadow:var(--shadow)">
       <div style="font-family:'Bricolage Grotesque',sans-serif;font-weight:700;font-size:13px;margin-bottom:8px">Top spending</div>`;
@@ -242,7 +240,6 @@ function renderOverview(el) {
   if (goA) goA.onclick = () => openAccounts();
   const addA = document.getElementById('addAccount');
   if (addA) addA.onclick = () => openAccountForm(null, renderContent);
-  wireRecurringBanner(ym);
 }
 
 function row(label, amount, color) {
@@ -338,8 +335,6 @@ function renderSpending(el) {
     <button id="mn_next" ${isNow ? 'style="opacity:.3;pointer-events:none"' : ''}>›</button>
   </div>`;
 
-  if (isNow) h += recurringBannerHTML(V.spendMonth);
-
   if (items.length === 0) {
     h += `<div class="empty">No spending in ${monthDisplay(V.spendMonth)}.<br>Tap ＋ to add an entry.</div>`;
   } else {
@@ -381,7 +376,6 @@ function renderSpending(el) {
   document.getElementById('mn_prev').onclick = () => { V.spendMonth = prevMonth(V.spendMonth); renderContent(); };
   document.getElementById('mn_next').onclick = () => { V.spendMonth = nextMonthStr(V.spendMonth); renderContent(); };
   el.querySelectorAll('[data-spend]').forEach((item) => (item.onclick = () => openEditSpend(item.dataset.spend)));
-  if (isNow) wireRecurringBanner(V.spendMonth);
 }
 
 // ── Loans tab ───────────────────────────────────────────────────────────────
@@ -464,51 +458,6 @@ function renderSavingsTab(el) {
   }
   el.innerHTML = h;
   el.querySelectorAll('[data-sav]').forEach((e) => (e.onclick = () => openSavDetail(e.dataset.sav)));
-}
-
-// ── Recurring banner (shown on the current month only) ─────────────────────────
-function recurringBannerHTML(ym) {
-  const pend = pendingRecurring(ym);
-  if (!pend.length) return '';
-  const out = pend.filter((r) => r.type !== 'income').reduce((s, r) => s + r.amount, 0);
-  const inc = pend.filter((r) => r.type === 'income').reduce((s, r) => s + r.amount, 0);
-  const parts = [];
-  if (out) parts.push(`−${fmtShort(out)}`);
-  if (inc) parts.push(`+${fmtShort(inc)}`);
-  return `<div class="rec-banner">
-    <div><div class="rec-t">🔁 ${pend.length} recurring ${pend.length === 1 ? 'entry' : 'entries'}</div>
-      <div class="rec-s">${parts.join(' / ')} · not added to ${monthDisplay(ym)} yet</div></div>
-    <button class="rec-add" id="recApply">Add all</button>
-  </div>`;
-}
-function wireRecurringBanner(ym) {
-  const btn = document.getElementById('recApply');
-  if (btn) btn.onclick = () => applyRecurring(ym);
-}
-// Apply every pending template for the month: expenses become ordinary spends
-// tagged rec:<id> (idempotent, editable); income credits its account and marks
-// the month applied. Both optionally move money in/out of a chosen account.
-function applyRecurring(ym) {
-  const pend = pendingRecurring(ym);
-  if (!pend.length) return;
-  const dim = daysInMonth(ym);
-  pend.forEach((r, i) => {
-    if (r.type === 'income') {
-      if (r.account) adjustAccount(r.account, r.amount);
-      r.applied = r.applied || []; r.applied.push(ym);
-      return;
-    }
-    const day = Math.min(Math.max(1, r.day || 1), dim);
-    const id = 'sp_' + Date.now() + '_' + i;
-    const ts = new Date(`${ym}-${String(day).padStart(2, '0')}T12:00:00`).getTime();
-    S.spends.push({ id, ts, month: ym, amount: r.amount, category: r.category, note: r.note || '', rec: r.id, account: r.account || undefined });
-    if (r.account) adjustAccount(r.account, -r.amount);
-    persistSpend(id);
-  });
-  [...new Set(pend.map((r) => r.account).filter(Boolean))].forEach((aid) => persistAcc(aid));
-  if (pend.some((r) => r.type === 'income')) persistSettings(); // r.applied lives in settings
-  renderContent();
-  toast(`Applied ${pend.length} recurring ${pend.length === 1 ? 'entry' : 'entries'}`);
 }
 
 // ── Render dispatch / boot ────────────────────────────────────────────────────

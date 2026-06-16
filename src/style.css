@@ -17,7 +17,6 @@
 [data-theme="dark"] .primary,
 [data-theme="dark"] .toast,
 [data-theme="dark"] .modal-box .primary,
-[data-theme="dark"] .rec-add,
 [data-theme="dark"] .chip:active,
 [data-theme="dark"] .cat-pick.selected{background:#3A4150}
 *{box-sizing:border-box;margin:0;padding:0}
@@ -256,14 +255,3 @@ select.set-input{appearance:auto;-webkit-appearance:auto;cursor:pointer}
 [data-theme="dark"] .alert-card.bad{background:#3A1F1C;color:#F26B5E}
 [data-theme="dark"] .alert-card.warn{background:#3A331C;color:#FCD34D}
 
-/* ── Segmented control (expense / income toggle) ── */
-.seg{display:flex;gap:0;background:var(--paper);border-radius:11px;padding:3px;margin:4px 0 6px}
-.seg button{flex:1;border:none;background:none;border-radius:8px;padding:9px;font-family:'Bricolage Grotesque',sans-serif;font-weight:600;font-size:13px;color:var(--soft);cursor:pointer}
-.seg button.on{background:var(--card);color:var(--ink);box-shadow:var(--shadow)}
-
-/* ── Recurring banner ── */
-.rec-banner{display:flex;align-items:center;justify-content:space-between;gap:12px;background:var(--card);border:1px dashed var(--rule);border-radius:14px;padding:12px 14px;margin-bottom:12px;box-shadow:var(--shadow)}
-.rec-banner .rec-t{font-family:'Bricolage Grotesque',sans-serif;font-weight:700;font-size:13px}
-.rec-banner .rec-s{font-size:11px;color:var(--soft);margin-top:2px}
-.rec-add{background:var(--ink);color:#fff;border-radius:10px;padding:9px 15px;font-size:12px;font-weight:600;font-family:'Bricolage Grotesque',sans-serif;flex-shrink:0;transition:transform .08s}
-.rec-add:active{transform:scale(.96)}

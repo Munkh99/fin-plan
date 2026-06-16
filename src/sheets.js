@@ -1,7 +1,7 @@
 // The interactive layer: every bottom-sheet form/detail, the settings sheet,
-// the categories & recurring managers, onboarding, the login screen, and the
-// import/export/undo actions. Calls back into views.js (renderContent /
-// renderShell) to refresh the underlying screen — the cycle resolves at runtime.
+// the accounts & categories managers, onboarding, and the login screen. Calls
+// back into views.js (renderContent / renderShell) to refresh the underlying
+// screen — the cycle resolves at runtime.
 
 import { esc, CURRENCIES, APP_VERSION, PALETTE, ACCOUNT_TYPES, ACCOUNT_TYPE_MAP } from './constants.js';
 import {
@@ -474,102 +474,6 @@ export function openSavingsForm(editId, onDone) {
   };
 }
 
-// ── Recurring transactions manager ─────────────────────────────────────────────
-export function openRecurring() {
-  const list = (S.recurring || []).map((r) => {
-    const inc = r.type === 'income';
-    const c = catOf(r.category);
-    const icon = inc ? '💰' : c.icon;
-    const label = inc ? 'Income' : c.label;
-    const acctName = r.account && S.accounts[r.account] ? S.accounts[r.account].name : '';
-    return `<div class="spend-item" data-rec="${esc(r.id)}">
-      <div class="cat-icon" style="background:${inc ? '#147A5C' : c.color}22">${esc(icon)}</div>
-      <div class="info"><div class="name">${r.note ? esc(r.note) : esc(label)}</div>
-        <div class="meta">${esc(label)} · day ${Math.min(31, Math.max(1, r.day || 1))}${acctName ? ` · ${esc(acctName)}` : ''}</div></div>
-      <div class="amt"${inc ? ' style="color:var(--emerald)"' : ''}>${inc ? '+' : ''}${fmt(r.amount)}</div>
-    </div>`;
-  }).join('');
-  scrim.innerHTML = `<div class="sheet">
-    <h2>Recurring</h2>
-    <div class="hint">Bills, rent and subscriptions you have every month. Add them once, then tap “Add all” on the Overview or Spending tab each month.</div>
-    ${list || '<div class="empty" style="padding:14px 0">No recurring entries yet.</div>'}
-    <button class="ghost" id="rec_add" style="width:100%;margin-top:6px">＋ Add recurring entry</button>
-    <div class="btnrow"><button class="primary" id="rec_close">Done</button></div>
-  </div>`;
-  scrim.classList.add('open');
-  document.getElementById('rec_close').onclick = openSettings;
-  document.getElementById('rec_add').onclick = () => openRecurringForm(null);
-  scrim.querySelectorAll('[data-rec]').forEach((el) => (el.onclick = () => openRecurringForm(el.dataset.rec)));
-}
-
-function openRecurringForm(editId) {
-  const ex = editId ? (S.recurring || []).find((r) => r.id === editId) : null;
-  let type = ex ? (ex.type || 'expense') : 'expense';
-  let selCat = ex ? ex.category : V.lastCat;
-  // Draft holds in-progress field values so toggling expense/income (which
-  // re-renders to show/hide the category grid) doesn't lose what was typed.
-  const draft = {
-    amount: ex ? ex.amount : '',
-    note: ex ? (ex.note || '') : '',
-    day: ex ? Math.min(31, Math.max(1, ex.day || 1)) : 1,
-    account: ex ? (ex.account || '') : '',
-  };
-  const grid = () => allCats().map((c) => `
-    <div class="cat-pick${selCat === c.id ? ' selected' : ''}" data-cat="${esc(c.id)}">
-      <span class="icon">${esc(c.icon)}</span><span class="label">${esc(c.label)}</span>
-    </div>`).join('');
-  const readDraft = () => {
-    const a = document.getElementById('rc_amount'); if (a) draft.amount = (a.value || '').replace(/[^\d]/g, '');
-    const n = document.getElementById('rc_note'); if (n) draft.note = n.value;
-    const d = document.getElementById('rc_day'); if (d) draft.day = d.value;
-    draft.account = accountVal('rc_account') || draft.account;
-  };
-  const render = () => {
-    scrim.innerHTML = `<div class="sheet">
-      <h2>${ex ? 'Edit recurring' : 'Add recurring'}</h2>
-      <div class="seg" id="rc_type">
-        <button data-t="expense"${type === 'expense' ? ' class="on"' : ''}>Expense</button>
-        <button data-t="income"${type === 'income' ? ' class="on"' : ''}>Income</button>
-      </div>
-      <div class="amount-prefix">Amount (${esc(CUR.symbol)})</div>
-      <input class="amount-input" id="rc_amount" inputmode="numeric" placeholder="0" value="${draft.amount}">
-      ${type === 'expense' ? `<div class="cat-grid">${grid()}</div>` : ''}
-      <label class="set-label">Label (optional)</label>
-      <input class="set-input" id="rc_note" placeholder="${type === 'income' ? 'e.g. Salary, Freelance' : 'e.g. Rent, Netflix…'}" value="${esc(draft.note)}">
-      <label class="set-label">Day of month (1–31)</label>
-      <input class="set-input mono" id="rc_day" inputmode="numeric" maxlength="2" placeholder="1" style="width:120px" value="${Math.min(31, Math.max(1, parseInt(draft.day) || 1))}">
-      ${accountSelectHTML('rc_account', draft.account, type === 'income' ? 'Deposit to account' : 'Pay from account (optional)')}
-      <div class="btnrow">
-        ${editId ? '<button class="ghost" id="rc_del" style="color:var(--danger)">Delete</button>' : '<button class="ghost" id="rc_cancel">Cancel</button>'}
-        <button class="primary" id="rc_save">${ex ? 'Save' : 'Add'}</button>
-      </div></div>`;
-    scrim.classList.add('open');
-    scrim.querySelectorAll('#rc_type button').forEach((b) => (b.onclick = () => { readDraft(); type = b.dataset.t; render(); }));
-    scrim.querySelectorAll('.cat-pick').forEach((b) => (b.onclick = () => { selCat = b.dataset.cat; scrim.querySelectorAll('.cat-pick').forEach((x) => x.classList.toggle('selected', x.dataset.cat === selCat)); }));
-    const cancel = document.getElementById('rc_cancel'); if (cancel) cancel.onclick = openRecurring;
-    const del = document.getElementById('rc_del');
-    if (del) del.onclick = () => { S.recurring = (S.recurring || []).filter((r) => r.id !== editId); persistSettings(); openRecurring(); };
-    document.getElementById('rc_save').onclick = () => {
-      const amount = parseInt((document.getElementById('rc_amount').value || '').replace(/[^\d]/g, '')) || 0;
-      if (!amount) { toast('Enter an amount.'); return; }
-      const note = (document.getElementById('rc_note').value || '').trim();
-      const day = Math.min(31, Math.max(1, parseInt(document.getElementById('rc_day').value) || 1));
-      const account = accountVal('rc_account');
-      if (ex) {
-        ex.type = type; ex.amount = amount; ex.note = note; ex.day = day; ex.account = account || undefined;
-        if (type === 'expense') { ex.category = selCat; delete ex.applied; }
-        else { delete ex.category; ex.applied = ex.applied || []; }
-      } else {
-        const t = { id: 'rec_' + Date.now(), type, amount, note, day, account: account || undefined };
-        if (type === 'expense') t.category = selCat; else t.applied = [];
-        S.recurring = S.recurring || []; S.recurring.push(t);
-      }
-      persistSettings(); openRecurring();
-    };
-  };
-  render();
-}
-
 // ── Categories manager (custom categories + per-category budgets) ──────────────
 export function openCategories() {
   const rows = allCats().map((c) => {
@@ -728,7 +632,6 @@ export function openSettings() {
   <div class="btnrow" style="margin-top:0">
     <button class="ghost" id="acctsBtn">🏦 Accounts</button>
     <button class="ghost" id="catsBtn">🏷 Categories</button>
-    <button class="ghost" id="recBtn">🔁 Recurring</button>
   </div>
   <div class="divider"></div>
   <div class="row-space" style="margin-bottom:4px">
@@ -755,7 +658,6 @@ export function openSettings() {
   };
   document.getElementById('acctsBtn').onclick = openAccounts;
   document.getElementById('catsBtn').onclick = openCategories;
-  document.getElementById('recBtn').onclick = openRecurring;
   document.getElementById('resetBtn').onclick = async () => { if (await confirmDialog('Erase everything? This cannot be undone.', { okText: 'Erase', danger: true })) { resetAll(); closeSheet(); V.view = 'onboarding'; renderOnboarding(); } };
   const gi = (id) => parseInt((document.getElementById(id).value || '').replace(/[^\d]/g, '')) || 0;
   document.getElementById('saveSet').onclick = () => {

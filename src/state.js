@@ -25,7 +25,6 @@ export function defaults() {
     history: [],
     catBudgets: {},        // { categoryId: monthly limit }
     customCategories: [],  // user-added categories: { id, label, icon, color }
-    recurring: [],         // recurring spend templates: { id, amount, category, note, day }
     currency: 'MNT',       // display currency code (see CURRENCIES)
   };
 }
@@ -45,7 +44,6 @@ export function migrate(s) {
   if (!s.history) s.history = [];
   if (!s.catBudgets) s.catBudgets = {};
   if (!s.customCategories) s.customCategories = [];
-  if (!s.recurring) s.recurring = [];
   if (!s.currency) s.currency = 'MNT';
   if (s.budget === undefined) s.budget = s.expenses || 0;
   if (s.onboarded === undefined) s.onboarded = !!(s.loanOrder && s.loanOrder.length > 0);
@@ -112,7 +110,6 @@ export const ac = (id) => (S.accounts[id] && S.accounts[id].color) || '#147A5C';
 export const acctIcon = (type) => (ACCOUNT_TYPE_MAP[type] || ACCOUNT_TYPE_MAP.bank).icon;
 export const ord = (d) => d + (d === 1 ? 'st' : d === 2 ? 'nd' : d === 3 ? 'rd' : 'th');
 export const getInt = (id) => parseInt((document.getElementById(id).value || '').replace(/[^\d]/g, '')) || 0;
-export const daysInMonth = (ym) => { const [y, m] = ym.split('-').map(Number); return new Date(y, m, 0).getDate(); };
 
 export function nowMonth() {
   const d = new Date();
@@ -189,11 +186,3 @@ export function lastMonthsTotals(n) {
   return arr;
 }
 
-// Recurring templates not yet added to the given month. Expenses are detected by
-// their spend tag (idempotent); income credits an account so it has no spend —
-// it's tracked by the months listed in r.applied.
-export function pendingRecurring(ym) {
-  return (S.recurring || []).filter((r) => r.type === 'income'
-    ? !((r.applied || []).includes(ym))
-    : !S.spends.some((sp) => sp.month === ym && sp.rec === r.id));
-}

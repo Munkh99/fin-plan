@@ -11,7 +11,7 @@ import {
   setDoc,
   deleteDoc,
   writeBatch,
-  getDoc,
+  getDocFromServer,
   serverTimestamp,
   deleteField,
 } from 'firebase/firestore';
@@ -54,7 +54,6 @@ function settingsPayload() {
     history: S.history,
     catBudgets: S.catBudgets,
     customCategories: S.customCategories,
-    recurring: S.recurring,
     currency: S.currency,
     schema: SCHEMA,
     updatedAt: serverTimestamp(),
@@ -207,7 +206,6 @@ export function uploadOps(src) {
     history: src.history || [],
     catBudgets: src.catBudgets || {},
     customCategories: src.customCategories || [],
-    recurring: src.recurring || [],
     currency: src.currency || 'MNT',
     schema: SCHEMA,
     payload: deleteField(),
@@ -220,11 +218,19 @@ export function uploadOps(src) {
 //  - legacy single-blob doc { payload } → per-entity docs
 //  - cloud has no doc yet (e.g. database just created) but this device has local
 //    data → push it up, so the empty-collection snapshots don't wipe it
+//
+// CRITICAL: this read is FROM THE SERVER (getDocFromServer), never the local
+// cache. The seed/migrate branches below write local data to the cloud, so they
+// must only fire on authoritative server state. If we used the cached read and
+// the device was offline (or running with a stale cache), a "cloud looks empty/
+// legacy" misread would upload stale local data and clobber newer cloud data.
+// When offline the server read throws → we skip seeding entirely and just let the
+// listeners sync once back online.
 export async function prepareRemote() {
   if (!canWrite()) return;
   let snap;
-  try { snap = await getDoc(userDoc()); }
-  catch (e) { console.error('[fin-plan] Firestore read failed (is the database created?):', e); return; }
+  try { snap = await getDocFromServer(userDoc()); }
+  catch (e) { console.warn('[fin-plan] offline/unavailable at boot — skipping seed/migrate; will sync when online'); return; }
   const d = snap.exists() ? snap.data() : null;
 
   if (d && d.payload && d.schema !== SCHEMA) {
@@ -264,7 +270,6 @@ export function attachListeners() {
     S.history = d.history || [];
     S.catBudgets = d.catBudgets || {};
     S.customCategories = d.customCategories || [];
-    S.recurring = d.recurring || [];
     S.currency = d.currency || 'MNT';
     applyCurrency(S.currency);
     reconcileFn();
