@@ -5,6 +5,20 @@
   --indigo:#2B2D77;--emerald:#147A5C;--burnt:#C2410C;--danger:#B42318;
   --shadow:0 1px 2px rgba(20,22,30,.06),0 8px 24px rgba(20,22,30,.06);
 }
+/* Dark theme: flip page/card/text; keep the "ink" accent surfaces dark so white
+   text on them stays readable. */
+[data-theme="dark"]{
+  --paper:#15171C;--card:#1F222A;--ink:#ECEDF0;--soft:#A2A9B4;--faint:#727A86;--rule:#2D323C;
+  --danger:#F26B5E;
+  --shadow:0 1px 2px rgba(0,0,0,.45),0 8px 24px rgba(0,0,0,.45);
+}
+[data-theme="dark"] .hero,
+[data-theme="dark"] .fab,
+[data-theme="dark"] .primary,
+[data-theme="dark"] .toast,
+[data-theme="dark"] .modal-box .primary,
+[data-theme="dark"] .chip:active,
+[data-theme="dark"] .cat-pick.selected{background:#3A4150}
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--paper)}
 #app{font-family:'IBM Plex Mono',ui-monospace,monospace;color:var(--ink);max-width:480px;margin:0 auto;-webkit-font-smoothing:antialiased;position:relative;min-height:100vh}
@@ -126,7 +140,7 @@ button{font-family:inherit;cursor:pointer;border:none}
 .btnrow .primary,.btnrow .ghost{flex:1}
 .btnrow{display:flex;gap:10px;margin-top:14px}
 .set-label{font-size:11px;color:var(--soft);margin-top:9px;display:block}
-.set-input{width:100%;border:1px solid var(--rule);background:#fff;border-radius:10px;padding:10px 12px;font-family:'IBM Plex Mono',monospace;font-size:14px;color:var(--ink);margin-top:3px;outline:none;-webkit-appearance:none}
+.set-input{width:100%;border:1px solid var(--rule);background:var(--card);border-radius:10px;padding:10px 12px;font-family:'IBM Plex Mono',monospace;font-size:14px;color:var(--ink);margin-top:3px;outline:none;-webkit-appearance:none}
 .set-input:focus{border-color:var(--ink)}
 select.set-input{appearance:auto;-webkit-appearance:auto;cursor:pointer}
 .two{display:grid;grid-template-columns:1fr 1fr;gap:9px}
@@ -170,6 +184,19 @@ select.set-input{appearance:auto;-webkit-appearance:auto;cursor:pointer}
 
 /* ── Onboarding ── */
 .ob-item{display:flex;align-items:center;gap:10px;background:var(--card);border-radius:12px;padding:11px 14px;margin-bottom:8px;border-left:4px solid var(--rule)}
+
+/* ── Toggle switch ── */
+.toggle{width:46px;height:27px;border-radius:20px;background:var(--rule);position:relative;border:none;cursor:pointer;transition:background .2s;flex:0 0 auto;padding:0}
+.toggle .knob{position:absolute;top:3px;left:3px;width:21px;height:21px;border-radius:50%;background:#fff;transition:transform .2s;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+.toggle.on{background:var(--emerald)}
+.toggle.on .knob{transform:translateX(19px)}
+
+/* ── Modal dialog ── */
+.modal-scrim{position:fixed;inset:0;background:rgba(20,22,30,.45);display:none;align-items:center;justify-content:center;z-index:70;padding:24px}
+.modal-scrim.open{display:flex}
+.modal-box{background:var(--card);border-radius:16px;padding:20px;max-width:340px;width:100%;box-shadow:0 12px 40px rgba(20,22,30,.4)}
+.modal-box .modal-msg{font-size:14px;line-height:1.5;color:var(--ink);margin-bottom:16px;white-space:pre-line}
+.modal-box .btnrow{margin-top:0}
 
 /* ── Toast ── */
 .toast{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom));transform:translateX(-50%) translateY(16px);background:var(--ink);color:#fff;padding:10px 16px;border-radius:12px;font-size:13px;font-weight:600;box-shadow:0 6px 24px rgba(20,22,30,.34);opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:60;max-width:90%;text-align:center}

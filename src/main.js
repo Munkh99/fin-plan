@@ -1,4 +1,5 @@
 import './style.css';
+import * as F from './finance.js';
 import { auth, db, provider, configured } from './firebase.js';
 import {
   onAuthStateChanged,
@@ -35,10 +36,22 @@ const BASE = 2026 * 12 + 5;
 
 const KEY = 'finplan_v2';
 const UIDKEY = 'finplan_uid';
+const THEMEKEY = 'finplan_theme';
 const SCHEMA = 2;
+const APP_VERSION = '2.1.0';
 
 let currentUser = null;
 let syncState = 'idle';
+
+// ── Theme (light / dark) ──────────────────────────────────────────────────────
+function getTheme() { try { return localStorage.getItem(THEMEKEY) || 'light'; } catch (e) { return 'light'; } }
+function applyTheme(t) {
+  document.documentElement.dataset.theme = t;
+  try { localStorage.setItem(THEMEKEY, t); } catch (e) {}
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', t === 'dark' ? '#15171C' : '#191B21');
+}
+applyTheme(getTheme());
 
 // ── Escaping ──────────────────────────────────────────────────────────────────
 // Escape any user-supplied string before it enters an innerHTML template or an
@@ -334,6 +347,12 @@ const fmtShort = (n) => {
     : '₮' + n.toLocaleString('en-US');
 };
 const monthLabel = (abs) => { const t = BASE + abs; return `${Math.floor(t / 12)}.${String((t % 12) + 1).padStart(2, '0')}`; };
+// Current real calendar month as an absolute index (same basis as startAbs).
+const nowAbs = () => { const d = new Date(); return d.getFullYear() * 12 + d.getMonth() - BASE; };
+// The month the user is currently logging loans for; capped so the loan timeline
+// never runs ahead of the real calendar (keeps it aligned with the Spending tab).
+const loanMonthAbs = () => S.startAbs + S.cursor;
+const caughtUpOnLoans = () => loanMonthAbs() > nowAbs();
 const lc = (id) => (S.loans[id] && S.loans[id].color) || '#566072';
 const sc = (id) => (S.savings[id] && S.savings[id].color) || '#0369A1';
 const ord = (d) => d + (d === 1 ? 'st' : d === 2 ? 'nd' : d === 3 ? 'rd' : 'th');
@@ -358,47 +377,13 @@ function nextMonthStr(ym) {
   return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
 }
 
-// ── Finance ───────────────────────────────────────────────────────────────────
-function cloneLoans() {
-  const L = {}; for (const k in S.loans) L[k] = { ...S.loans[k] }; return L;
-}
-function plannedLoans(L) {
-  const out = {};
-  for (const id of S.loanOrder) {
-    const l = L[id]; if (!l || l.bal <= 0.5) { out[id] = 0; continue; }
-    if (l.type === 'fixed') out[id] = Math.min(l.plan, l.bal * (1 + l.rate));
-  }
-  const rev = S.loanOrder.filter((id) => L[id] && L[id].bal > 0.5 && L[id].type === 'revolving');
-  const mins = {};
-  for (const id of rev) { const l = L[id]; mins[id] = l.bal * l.rate + l.bal * 0.10; }
-  const fixedSum = S.loanOrder.reduce((s, id) => (out[id] || 0) + s, 0);
-  const minSum = rev.reduce((s, id) => mins[id] + s, 0);
-  let surplus = Math.max(0, (S.income - S.budget) - fixedSum - minSum);
-  for (let i = 0; i < rev.length; i++) { const id = rev[i], l = L[id]; out[id] = Math.min(l.bal * (1 + l.rate), i === 0 ? mins[id] + surplus : mins[id]); }
-  return out;
-}
-function totalSavingsContrib() {
-  return S.savingsOrder.reduce((s, id) => { const sv = S.savings[id]; return (!sv || sv.current >= sv.target) ? s : s + sv.monthly; }, 0);
-}
-function freeCash() {
-  const lp = plannedLoans(cloneLoans());
-  return S.income - S.budget - S.loanOrder.reduce((s, id) => s + (lp[id] || 0), 0) - totalSavingsContrib();
-}
-function simulateLoans() {
-  const L = cloneLoans(); const snaps = []; let guard = 0, abs = S.startAbs + S.cursor, totalInt = 0;
-  const any = () => S.loanOrder.some((id) => L[id] && L[id].bal > 0.5);
-  const hasPlan = () => S.loanOrder.some((id) => { const l = L[id]; if (!l || l.bal <= 0.5) return false; return l.type === 'revolving' || (l.type === 'fixed' && l.plan > 0); });
-  while (any() && guard < 1200 && hasPlan()) {
-    snaps.push({ abs, bals: Object.fromEntries(S.loanOrder.map((id) => [id, L[id] ? L[id].bal : 0])) });
-    const plan = plannedLoans(L);
-    if (S.loanOrder.reduce((s, id) => s + (plan[id] || 0), 0) <= 0) break;
-    for (const id of S.loanOrder) { const l = L[id]; if (!l || l.bal <= 0.5) { if (l) l.bal = 0; continue; } totalInt += l.bal * l.rate; l.bal = Math.max(0, l.bal * (1 + l.rate) - (plan[id] || 0)); }
-    abs++; guard++;
-  }
-  snaps.push({ abs, bals: Object.fromEntries(S.loanOrder.map((id) => [id, L[id] ? Math.max(0, L[id].bal) : 0])) });
-  return { snaps, months: guard, totalInt, payoffAbs: S.startAbs + S.cursor + Math.max(0, guard - 1) };
-}
-function savMonthsToGoal(id) { const sv = S.savings[id]; if (!sv) return null; const rem = sv.target - sv.current; if (rem <= 0) return 0; if (sv.monthly <= 0) return null; return Math.ceil(rem / sv.monthly); }
+// ── Finance (pure engine lives in finance.js; these bind it to live state) ────
+const cloneLoans = () => F.cloneLoans(S);
+const plannedLoans = (L) => F.plannedLoans(S, L);
+const totalSavingsContrib = () => F.totalSavingsContrib(S);
+const freeCash = () => F.freeCash(S);
+const simulateLoans = () => F.simulateLoans(S);
+const savMonthsToGoal = (id) => F.savMonthsToGoal(S, id);
 
 // ── Spending helpers ──────────────────────────────────────────────────────────
 function spendsForMonth(ym) { return S.spends.filter((sp) => sp.month === ym); }
@@ -429,6 +414,41 @@ function toast(msg) {
   el.classList.add('show');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => el.classList.remove('show'), 2200);
+}
+
+// ── In-app dialogs (replace native confirm/alert) ─────────────────────────────
+// confirmDialog returns a Promise<boolean>; alertDialog a Promise<void>.
+function confirmDialog(message, { okText = 'Confirm', cancelText = 'Cancel', danger = false } = {}) {
+  return new Promise((resolve) => {
+    let el = document.getElementById('modal');
+    if (!el) { el = document.createElement('div'); el.id = 'modal'; document.body.appendChild(el); }
+    el.className = 'modal-scrim open';
+    el.innerHTML = `<div class="modal-box">
+      <div class="modal-msg">${esc(message)}</div>
+      <div class="btnrow">
+        <button class="ghost" id="m_cancel">${esc(cancelText)}</button>
+        <button class="primary" id="m_ok"${danger ? ' style="background:var(--danger)"' : ''}>${esc(okText)}</button>
+      </div>
+    </div>`;
+    const done = (v) => { el.className = 'modal-scrim'; el.innerHTML = ''; resolve(v); };
+    el.querySelector('#m_cancel').onclick = () => done(false);
+    el.querySelector('#m_ok').onclick = () => done(true);
+    el.onclick = (e) => { if (e.target === el) done(false); };
+  });
+}
+function alertDialog(message, okText = 'OK') {
+  return new Promise((resolve) => {
+    let el = document.getElementById('modal');
+    if (!el) { el = document.createElement('div'); el.id = 'modal'; document.body.appendChild(el); }
+    el.className = 'modal-scrim open';
+    el.innerHTML = `<div class="modal-box">
+      <div class="modal-msg">${esc(message)}</div>
+      <div class="btnrow"><button class="primary" id="m_ok">${esc(okText)}</button></div>
+    </div>`;
+    const done = () => { el.className = 'modal-scrim'; el.innerHTML = ''; resolve(); };
+    el.querySelector('#m_ok').onclick = done;
+    el.onclick = (e) => { if (e.target === el) done(); };
+  });
 }
 
 // ── DOM ───────────────────────────────────────────────────────────────────────
@@ -521,7 +541,7 @@ function updateSyncDot() {
   dot.className = 'sync-dot' + (syncState === 'syncing' ? ' syncing' : syncState === 'error' ? ' error' : '');
   dot.title = syncState === 'idle' ? 'Synced to cloud' : syncState === 'syncing' ? 'Saving…' : 'Not synced — tap for help';
   dot.onclick = syncState === 'error'
-    ? () => alert('Your changes are saved on this device but could NOT be saved to the cloud.\n\nMost likely the Cloud Firestore database has not been created yet. See the console for the exact error.')
+    ? () => alertDialog('Your changes are saved on this device but could not be saved to the cloud. See the browser console for the exact error.')
     : null;
 }
 
@@ -779,7 +799,9 @@ function renderLoans(el) {
       </div>`;
     }
     h += `<div class="btnrow" style="margin-top:4px">
-      <button class="ghost" id="logLoansBtn">📋 Log this month's payments</button>
+      ${caughtUpOnLoans()
+        ? `<div class="empty" style="flex:1;padding:11px;margin:0">✓ Logged through ${monthLabel(nowAbs())}</div>`
+        : `<button class="ghost" id="logLoansBtn">📋 Log ${monthLabel(loanMonthAbs())} payments</button>`}
       ${S.cursor > 0 ? '<button class="ghost" id="undoBtn" style="flex:0 0 auto">↩</button>' : ''}
     </div>`;
   }
@@ -864,7 +886,7 @@ function openAddSpend(prefill) {
   scrim.querySelectorAll('.cat-pick').forEach((btn) => { btn.onclick = () => { selCat = btn.dataset.cat; scrim.querySelectorAll('.cat-pick').forEach((b) => b.classList.toggle('selected', b.dataset.cat === selCat)); }; });
   document.getElementById('sp_save').onclick = () => {
     const amount = parseInt((document.getElementById('sp_amount').value || '').replace(/[^\d]/g, '')) || 0;
-    if (!amount) { alert('Enter an amount.'); return; }
+    if (!amount) { toast('Enter an amount.'); return; }
     const note = (document.getElementById('sp_note').value || '').trim();
     const dateStr = document.getElementById('sp_date').value || todayStr();
     const ts = dateStr === todayStr() ? Date.now() : new Date(dateStr + 'T12:00:00').getTime();
@@ -904,15 +926,15 @@ function openEditSpend(id) {
   scrim.querySelectorAll('.cat-pick').forEach((btn) => {
     btn.onclick = () => { selCat = btn.dataset.cat; scrim.querySelectorAll('.cat-pick').forEach((b) => b.classList.toggle('selected', b.dataset.cat === selCat)); };
   });
-  document.getElementById('sp_del').onclick = () => {
-    if (!confirm('Delete this entry?')) return;
+  document.getElementById('sp_del').onclick = async () => {
+    if (!(await confirmDialog('Delete this entry?', { okText: 'Delete', danger: true }))) return;
     S.spends = S.spends.filter((x) => x.id !== id);
     persistSpendDelete(id); closeSheet(); renderContent();
     toast('Entry deleted');
   };
   document.getElementById('sp_save').onclick = () => {
     const amount = parseInt((document.getElementById('sp_amount').value || '').replace(/[^\d]/g, '')) || 0;
-    if (!amount) { alert('Enter an amount.'); return; }
+    if (!amount) { toast('Enter an amount.'); return; }
     const note = (document.getElementById('sp_note').value || '').trim();
     const dateStr = document.getElementById('sp_date').value || dateStrFromTs(sp.ts);
     const ts = new Date(dateStr + 'T12:00:00').getTime();
@@ -1050,14 +1072,14 @@ function openLoanForm(editId, onDone) {
   const cancelBtn = document.getElementById('nl_cancel');
   if (cancelBtn) cancelBtn.onclick = closeSheet;
   const delBtn = document.getElementById('nl_del');
-  if (delBtn) delBtn.onclick = () => {
-    if (!confirm(`Delete "${S.loans[editId].name}"?`)) return;
+  if (delBtn) delBtn.onclick = async () => {
+    if (!(await confirmDialog(`Delete "${S.loans[editId].name}"?`, { okText: 'Delete', danger: true }))) return;
     S.loanOrder = S.loanOrder.filter((x) => x !== editId); delete S.loans[editId];
     deleteLoanFull(editId); closeSheet(); if (onDone) onDone();
   };
   document.getElementById('nl_save').onclick = () => {
     const name = (document.getElementById('nl_name').value || '').trim();
-    if (!name) { alert('Enter a loan name.'); return; }
+    if (!name) { toast('Enter a loan name.'); return; }
     const bal = getInt('nl_bal');
     const rate = parseFloat(document.getElementById('nl_rate').value) || 0;
     const type = document.getElementById('nl_type').value;
@@ -1101,14 +1123,14 @@ function openSavingsForm(editId, onDone) {
   const cancelBtn = document.getElementById('sv_cancel');
   if (cancelBtn) cancelBtn.onclick = closeSheet;
   const delBtn = document.getElementById('sv_del');
-  if (delBtn) delBtn.onclick = () => {
-    if (!confirm(`Delete "${S.savings[editId].name}"?`)) return;
+  if (delBtn) delBtn.onclick = async () => {
+    if (!(await confirmDialog(`Delete "${S.savings[editId].name}"?`, { okText: 'Delete', danger: true }))) return;
     S.savingsOrder = S.savingsOrder.filter((x) => x !== editId); delete S.savings[editId];
     deleteSavFull(editId); closeSheet(); if (onDone) onDone();
   };
   document.getElementById('sv_save').onclick = () => {
     const name = (document.getElementById('sv_name').value || '').trim();
-    if (!name) { alert('Enter a goal name.'); return; }
+    if (!name) { toast('Enter a goal name.'); return; }
     const current = getInt('sv_current'), target = getInt('sv_target'), monthly = getInt('sv_monthly');
     if (editId) {
       const sv = S.savings[editId]; sv.name = name; sv.current = current; sv.target = target; sv.monthly = monthly;
@@ -1125,6 +1147,7 @@ function openSavingsForm(editId, onDone) {
 
 // ── Log loan payments ─────────────────────────────────────────────────────────
 function openLogLoans() {
+  if (caughtUpOnLoans()) { toast(`All caught up — come back next month to log ${monthLabel(nowAbs() + 1)}.`); return; }
   const plan = plannedLoans(cloneLoans());
   const cur = monthLabel(S.startAbs + S.cursor);
   let h = `<div class="sheet"><h2>Log ${cur}</h2>
@@ -1207,18 +1230,33 @@ function openSettings() {
   <div style="font-size:11px;color:var(--soft);margin-bottom:10px">Split the budget above into per-category limits. You'll see a ⚠ when you go over one.</div>
   ${CATEGORIES.map((c) => `<div class="catbud-row"><span class="lbl">${c.icon} ${c.label}</span><input class="set-input mono" id="cb_${c.id}" inputmode="numeric" placeholder="—" value="${S.catBudgets[c.id] ? S.catBudgets[c.id].toLocaleString('en-US') : ''}"></div>`).join('')}
   <div class="divider"></div>
+  <div class="row-space" style="margin-bottom:4px">
+    <span style="font-family:'Bricolage Grotesque',sans-serif;font-weight:700">Dark mode</span>
+    <button class="toggle${getTheme() === 'dark' ? ' on' : ''}" id="themeToggle" role="switch" aria-checked="${getTheme() === 'dark'}"><span class="knob"></span></button>
+  </div>
+  <div class="divider"></div>
   <div class="btnrow">
     <button class="ghost" id="exportBtn">⬇ Export backup</button>
   </div>
   <div class="btnrow">
     <button class="ghost" id="resetBtn" style="color:var(--danger)">Reset all</button>
     <button class="primary" id="saveSet">Save</button>
+  </div>
+  <div style="text-align:center;font-size:11px;color:var(--soft);margin-top:14px">
+    ${currentUser ? (syncState === 'error' ? '⚠ Not synced to cloud' : '☁ Synced to your Google account') : 'Not signed in'} · v${APP_VERSION}
   </div></div>`;
   scrim.innerHTML = h; scrim.classList.add('open');
   const signOutBtn = document.getElementById('signOutBtn');
   if (signOutBtn) signOutBtn.onclick = doSignOut;
+  const themeToggle = document.getElementById('themeToggle');
+  if (themeToggle) themeToggle.onclick = () => {
+    const next = getTheme() === 'dark' ? 'light' : 'dark';
+    applyTheme(next);
+    themeToggle.classList.toggle('on', next === 'dark');
+    themeToggle.setAttribute('aria-checked', next === 'dark');
+  };
   document.getElementById('exportBtn').onclick = exportData;
-  document.getElementById('resetBtn').onclick = () => { if (confirm('Erase everything?')) { resetAll(); closeSheet(); view = 'onboarding'; renderOnboarding(); } };
+  document.getElementById('resetBtn').onclick = async () => { if (await confirmDialog('Erase everything? This cannot be undone.', { okText: 'Erase', danger: true })) { resetAll(); closeSheet(); view = 'onboarding'; renderOnboarding(); } };
   const gi = (id) => parseInt((document.getElementById(id).value || '').replace(/[^\d]/g, '')) || 0;
   document.getElementById('saveSet').onclick = () => {
     S.income = gi('s_income'); S.budget = gi('s_budget');
@@ -1256,10 +1294,10 @@ async function signIn() {
     if (btn) { btn.disabled = false; btn.textContent = 'Sign in with Google'; }
     const r = ['auth/popup-blocked', 'auth/popup-closed-by-user', 'auth/cancelled-popup-request'];
     if (r.includes(e.code)) { await signInWithRedirect(auth, provider); }
-    else alert('Sign-in failed: ' + (e.message || e.code));
+    else alertDialog('Sign-in failed: ' + (e.message || e.code));
   }
 }
-async function doSignOut() { if (confirm('Sign out?')) await signOut(auth); }
+async function doSignOut() { if (await confirmDialog('Sign out?', { okText: 'Sign out' })) await signOut(auth); }
 
 // ── Onboarding ───────────────────────────────────────────────────────────────
 function renderOnboarding() {
@@ -1327,7 +1365,7 @@ function exportData() {
     a.href = url; a.download = 'finplan-' + new Date().toISOString().slice(0, 10) + '.json';
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1500);
-  } catch (e) { alert('Export failed.'); }
+  } catch (e) { toast('Export failed.'); }
 }
 
 // ── Boot ───────────────────────────────────────────────────────────────────
