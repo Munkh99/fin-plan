@@ -42,7 +42,7 @@ export const KEY = 'finplan_v2';
 export const UIDKEY = 'finplan_uid';
 export const THEMEKEY = 'finplan_theme';
 export const SCHEMA = 2;
-export const APP_VERSION = '2.2.0';
+export const APP_VERSION = '0.2.3';
 
 // Escape any user-supplied string before it enters an innerHTML template or an
 // HTML attribute value. Prevents XSS / attribute-breakout from loan names,
