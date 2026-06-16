@@ -3,8 +3,12 @@
 // bag of mutable UI runtime state (V). Depends only on constants + state, so it
 // sits below the view layer in the dependency graph.
 
-import { esc, THEMEKEY } from './constants.js';
+import { esc, THEMEKEY, PHOTOKEY } from './constants.js';
 import { nowMonth } from './state.js';
+
+// Profile photo cached at sign-in so the avatar can render on the optimistic
+// boot — before auth resolves — instead of briefly showing the gear fallback.
+export function getCachedPhoto() { try { return localStorage.getItem(PHOTOKEY) || ''; } catch (e) { return ''; } }
 
 // ── Shared UI runtime state ────────────────────────────────────────────────────
 // Kept on one object so the view modules can read/write it without a tangle of

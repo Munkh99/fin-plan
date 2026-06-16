@@ -40,6 +40,7 @@ export const CURRENCIES = [
 
 export const KEY = 'finplan_v2';
 export const UIDKEY = 'finplan_uid';
+export const PHOTOKEY = 'finplan_photo';
 export const THEMEKEY = 'finplan_theme';
 export const SCHEMA = 2;
 export const APP_VERSION = '0.2.3';

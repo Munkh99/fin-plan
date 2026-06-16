@@ -5,14 +5,14 @@
 import './style.css';
 import { auth, configured } from './firebase.js';
 import { onAuthStateChanged } from 'firebase/auth';
-import { KEY, UIDKEY } from './constants.js';
+import { KEY, UIDKEY, PHOTOKEY } from './constants.js';
 import { setS, defaults, migrate, loadLocal } from './state.js';
 import {
   setCurrentUser, setReconcile, setSyncDot,
   detachListeners, attachListeners, prepareRemote,
 } from './store.js';
 import { appEl, V, closeSheet } from './dom.js';
-import { go, renderView, reconcile, updateSyncDot } from './views.js';
+import { go, renderView, reconcile, updateSyncDot, renderShell } from './views.js';
 import { renderLogin } from './sheets.js';
 
 // Wire the store's UI hooks once, so store.js never imports the view layer.
@@ -39,11 +39,11 @@ if (!configured) {
     if (!user) {
       detachListeners();
       closeSheet();
-      try { localStorage.removeItem(UIDKEY); } catch (e) {}
+      try { localStorage.removeItem(UIDKEY); localStorage.removeItem(PHOTOKEY); } catch (e) {}
       V.view = 'login'; V.booted = false; renderLogin();
       return;
     }
-    try { localStorage.setItem(UIDKEY, user.uid); } catch (e) {}
+    try { localStorage.setItem(UIDKEY, user.uid); localStorage.setItem(PHOTOKEY, user.photoURL || ''); } catch (e) {}
     // Different account on this device → drop the previous user's cached data.
     if (cachedUid && cachedUid !== user.uid) {
       try { localStorage.removeItem(KEY); } catch (e) {}
@@ -51,6 +51,10 @@ if (!configured) {
     }
     // Render immediately from cache — never block on the network.
     if (!V.booted) go();
+    // Optimistic boot rendered the shell before auth resolved (no user yet → gear
+    // icon). Now that the signed-in user is known, refresh the shell so the top
+    // bar shows the profile avatar consistently (not just right after onboarding).
+    else if (V.view === 'shell') renderShell();
     // Reconcile cloud state (migrate legacy / seed empty cloud) BEFORE attaching
     // listeners, so empty-collection snapshots can't wipe local-only data. The UI
     // is already visible above, so even if this is slow nothing blocks.

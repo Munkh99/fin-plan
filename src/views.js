@@ -12,7 +12,7 @@ import {
   totalAccounts, totalSaved, avgPrevSpend, applyCurrency, persistLocal,
 } from './state.js';
 import { currentUser, syncState } from './store.js';
-import { appEl, V, toast, alertDialog } from './dom.js';
+import { appEl, V, toast, alertDialog, getCachedPhoto } from './dom.js';
 import {
   openAddSpend, openEditSpend, openLoanForm, openLoanDetail,
   openSavDetail, openSettings, openAccountForm, openAccountDetail, openAddBalance,
@@ -77,8 +77,11 @@ function updateFab() {
 function renderTopbarRight() {
   const el = document.getElementById('topbar-right');
   if (!el) return;
-  if (currentUser && currentUser.photoURL) {
-    el.innerHTML = `<img class="avatar" id="settingsBtn" src="${esc(currentUser.photoURL)}" alt="Open settings" role="button" tabindex="0">`;
+  // Live photo if auth has resolved, else the cached one (instant on boot), so the
+  // avatar shows consistently; gear only if we genuinely have no photo.
+  const photo = (currentUser && currentUser.photoURL) || getCachedPhoto();
+  if (photo) {
+    el.innerHTML = `<img class="avatar" id="settingsBtn" src="${esc(photo)}" alt="Open settings" role="button" tabindex="0">`;
   } else {
     el.innerHTML = `<button class="iconbtn" id="settingsBtn" aria-label="Settings">⚙</button>`;
   }
