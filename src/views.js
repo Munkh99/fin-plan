@@ -9,7 +9,7 @@ import {
   lc, sc, ac, acctIcon, ord, prevMonth, nextMonthStr,
   simulateLoans, plannedLoans, cloneLoans, freeCash, totalSavingsContrib,
   byCategory, totalForMonth, spendsForMonth, lastMonthsTotals, savMonthsToGoal,
-  totalAccounts, avgPrevSpend, applyCurrency, persistLocal,
+  totalAccounts, totalSaved, avgPrevSpend, applyCurrency, persistLocal,
 } from './state.js';
 import { currentUser, syncState } from './store.js';
 import { appEl, V, toast, alertDialog } from './dom.js';
