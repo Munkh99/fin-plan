@@ -150,7 +150,7 @@ export function openAddSpend(prefill) {
     scrim.querySelectorAll('.cat-pick').forEach((b) => b.classList.toggle('selected', b.dataset.cat === selCat));
   }; });
   document.getElementById('sp_save').onclick = async () => {
-    const amount = parseInt((document.getElementById('sp_amount').value || '').replace(/[^\d]/g, '')) || 0;
+    const amount = Math.floor(parseFloat((document.getElementById('sp_amount').value || '').replace(/[^\d.]/g, '')) || 0);
     if (!amount) { toast('Enter an amount.'); return; }
     const note = (document.getElementById('sp_note').value || '').trim();
     const dateStr = document.getElementById('sp_date').value || todayStr();
@@ -210,7 +210,7 @@ export function openEditSpend(id) {
     toast('Entry deleted');
   };
   document.getElementById('sp_save').onclick = async () => {
-    const amount = parseInt((document.getElementById('sp_amount').value || '').replace(/[^\d]/g, '')) || 0;
+    const amount = Math.floor(parseFloat((document.getElementById('sp_amount').value || '').replace(/[^\d.]/g, '')) || 0);
     if (!amount) { toast('Enter an amount.'); return; }
     const note = (document.getElementById('sp_note').value || '').trim();
     const dateStr = document.getElementById('sp_date').value || dateStrFromTs(sp.ts);
@@ -635,7 +635,9 @@ function openNewCategory(onDone) {
 export function openAddBalance() {
   scrim.innerHTML = `<div class="sheet">
     <h2>Add</h2>
-    <div class="hint">What would you like to add to Accounts?</div>
+    <div class="hint">What would you like to add?</div>
+    <button class="ghost ab-opt" id="ab_income">💰 Income
+      <span>Salary, freelance or any money received</span></button>
     <button class="ghost ab-opt" id="ab_acct">🏦 Account
       <span>Bank, cash or e-wallet balance</span></button>
     <button class="ghost ab-opt" id="ab_goal">🎯 Saving
@@ -644,6 +646,7 @@ export function openAddBalance() {
   </div>`;
   scrim.classList.add('open');
   document.getElementById('ab_cancel').onclick = closeSheet;
+  document.getElementById('ab_income').onclick = () => openAddIncome();
   document.getElementById('ab_acct').onclick = () => openAccountForm(null, renderContent);
   document.getElementById('ab_goal').onclick = () => openSavingsForm(null, renderContent);
 }
@@ -656,8 +659,12 @@ export function openAccountDetail(id) {
   const items = [];
   for (const sp of S.spends) {
     if (sp.account !== id) continue;
-    const c = catOf(sp.category);
-    items.push({ ts: sp.ts, title: sp.note || c.label, meta: c.label, amount: sp.amount, icon: c.icon, color: c.color });
+    if (sp.type === 'income') {
+      items.push({ ts: sp.ts, title: sp.note || 'Income', meta: 'Income', amount: sp.amount, icon: '💰', color: '#7BE3C0', positive: true });
+    } else {
+      const c = catOf(sp.category);
+      items.push({ ts: sp.ts, title: sp.note || c.label, meta: c.label, amount: sp.amount, icon: c.icon, color: c.color });
+    }
   }
   for (const lid of S.loanOrder) {
     const l = S.loans[lid]; if (!l) continue;
@@ -668,20 +675,22 @@ export function openAccountDetail(id) {
     for (const e of (sv.contribLog || [])) if (e.account === id) items.push({ ts: absToTs(e.abs), title: 'Saving', meta: sv.name, amount: e.amount, icon: '🎯', color: '#147A5C' });
   }
   items.sort((x, y) => y.ts - x.ts);
-  const out = items.reduce((s, i) => s + i.amount, 0);
+  const out = items.filter((i) => !i.positive).reduce((s, i) => s + i.amount, 0);
+  const totalIn = items.filter((i) => i.positive).reduce((s, i) => s + i.amount, 0);
   const dateLabel = (ts) => new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
   const rows = items.map((i) => `<div class="spend-item">
     <div class="cat-icon" style="background:${i.color}22">${esc(i.icon)}</div>
     <div class="info"><div class="name">${esc(i.title)}</div><div class="meta">${esc(i.meta)} · ${dateLabel(i.ts)}</div></div>
-    <div class="amt">−${fmt(i.amount)}</div>
+    <div class="amt"${i.positive ? ' style="color:var(--emerald)"' : ''}>${i.positive ? '+' : '−'}${fmt(i.amount)}</div>
   </div>`).join('');
 
   scrim.innerHTML = `<div class="sheet">
     <h2><span class="dot" style="background:${ac(id)};width:12px;height:12px;border-radius:50%"></span>${esc(a.name)}</h2>
     <div class="hint">${esc(acctIcon(a.type))} ${esc(typeLabel)} · balance ${fmt(a.balance)}</div>
     <div class="row-space" style="margin-bottom:10px;font-size:12px;color:var(--soft)">
-      <span>${items.length} transaction${items.length === 1 ? '' : 's'} from this account</span><b class="mono">−${fmt(out)}</b>
+      <span>${items.length} transaction${items.length === 1 ? '' : 's'}</span>
+      <span>−${fmt(out)}${totalIn > 0 ? ` / <b style="color:var(--emerald)">+${fmt(totalIn)}</b>` : ''}</span>
     </div>
     ${rows || '<div class="empty" style="padding:14px 0">Nothing drawn from this account yet.<br>Pick it as the source when adding a spend, loan payment or saving.</div>'}
     <div class="btnrow">
@@ -738,6 +747,90 @@ export function openAccountForm(editId, onDone) {
       addAcc(id);
     }
     closeSheet(); if (onDone) onDone(); else renderContent();
+  };
+}
+
+// ── Add / edit income ─────────────────────────────────────────────────────────
+export function openAddIncome(prefill) {
+  scrim.innerHTML = `<div class="sheet">
+    <h2>Add income</h2>
+    <div class="amount-prefix">Amount (${esc(CUR.symbol)})</div>
+    <input class="amount-input" id="inc_amount" inputmode="numeric" placeholder="0" autocomplete="off" value="${prefill ? prefill.amount : ''}">
+    <label class="set-label">Source (optional)</label>
+    <input class="set-input" id="inc_note" placeholder="e.g. Salary, Freelance, Bonus…" value="${prefill ? esc(prefill.note || '') : ''}">
+    <label class="set-label">Date</label>
+    <input type="hidden" id="inc_date" value="${prefill && prefill.date ? esc(prefill.date) : todayStr()}">
+    <button class="set-input" id="inc_date_btn" type="button" style="text-align:left;cursor:pointer">${dateBtnLabel(prefill && prefill.date ? prefill.date : todayStr())}</button>
+    ${accountSelectHTML('inc_account', prefill && prefill.account, 'To account (optional)')}
+    <div class="btnrow">
+      <button class="ghost" id="inc_cancel">Cancel</button>
+      <button class="primary" id="inc_save">Add</button>
+    </div>
+  </div>`;
+  scrim.classList.add('open');
+  document.getElementById('inc_amount').focus();
+  document.getElementById('inc_cancel').onclick = closeSheet;
+  wireDateField('inc_date');
+  wireAccountField('inc_account');
+  document.getElementById('inc_save').onclick = () => {
+    const amount = Math.floor(parseFloat((document.getElementById('inc_amount').value || '').replace(/[^\d.]/g, '')) || 0);
+    if (!amount) { toast('Enter an amount.'); return; }
+    const note = (document.getElementById('inc_note').value || '').trim();
+    const dateStr = document.getElementById('inc_date').value || todayStr();
+    const ts = dateStr === todayStr() ? Date.now() : new Date(dateStr + 'T12:00:00').getTime();
+    const ym = dateStr.slice(0, 7);
+    const account = accountVal('inc_account');
+    const id = 'inc_' + Date.now();
+    S.spends.push({ id, ts, month: ym, amount, note, account: account || undefined, type: 'income' });
+    if (account) { adjustAccount(account, +amount); persistAcc(account); }
+    persistSpend(id); closeSheet(); renderContent();
+    toast(`Income ${fmt(amount)} added`);
+  };
+}
+
+export function openEditIncome(id) {
+  const inc = S.spends.find((x) => x.id === id && x.type === 'income'); if (!inc) return;
+  scrim.innerHTML = `<div class="sheet">
+    <h2>Edit income</h2>
+    <div class="amount-prefix">Amount (${esc(CUR.symbol)})</div>
+    <input class="amount-input" id="inc_amount" inputmode="numeric" value="${inc.amount}">
+    <label class="set-label">Source (optional)</label>
+    <input class="set-input" id="inc_note" value="${esc(inc.note || '')}">
+    <label class="set-label">Date</label>
+    <input type="hidden" id="inc_date" value="${dateStrFromTs(inc.ts)}">
+    <button class="set-input" id="inc_date_btn" type="button" style="text-align:left;cursor:pointer">${dateBtnLabel(dateStrFromTs(inc.ts))}</button>
+    ${accountSelectHTML('inc_account', inc.account, 'To account (optional)')}
+    <div class="btnrow">
+      <button class="ghost" id="inc_del" style="color:var(--danger)">Delete</button>
+      <button class="primary" id="inc_save">Save</button>
+    </div>
+  </div>`;
+  scrim.classList.add('open');
+  wireDateField('inc_date');
+  wireAccountField('inc_account');
+  document.getElementById('inc_del').onclick = async () => {
+    if (!(await confirmDialog('Delete this income entry?', { okText: 'Delete', danger: true }))) return;
+    if (inc.account) { adjustAccount(inc.account, -inc.amount); persistAcc(inc.account); }
+    S.spends = S.spends.filter((x) => x.id !== id);
+    persistSpendDelete(id); closeSheet(); renderContent();
+    toast('Income entry deleted');
+  };
+  document.getElementById('inc_save').onclick = () => {
+    const amount = Math.floor(parseFloat((document.getElementById('inc_amount').value || '').replace(/[^\d.]/g, '')) || 0);
+    if (!amount) { toast('Enter an amount.'); return; }
+    const note = (document.getElementById('inc_note').value || '').trim();
+    const dateStr = document.getElementById('inc_date').value || dateStrFromTs(inc.ts);
+    const ts = new Date(dateStr + 'T12:00:00').getTime();
+    const month = dateStr.slice(0, 7);
+    const account = accountVal('inc_account');
+    if (inc.account) adjustAccount(inc.account, -inc.amount);
+    if (account) adjustAccount(account, +amount);
+    const affected = [...new Set([inc.account, account].filter(Boolean))];
+    const idx = S.spends.findIndex((x) => x.id === id);
+    if (idx >= 0) S.spends[idx] = { ...S.spends[idx], amount, note, ts, month, account: account || undefined };
+    affected.forEach((aid) => persistAcc(aid));
+    persistSpend(id); closeSheet(); renderContent();
+    toast('Saved');
   };
 }
 

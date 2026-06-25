@@ -8,7 +8,7 @@ import {
   S, fmt, fmtShort, allCats, catOf, monthDisplay, nowMonth, monthLabel,
   lc, sc, ac, acctIcon, ord, prevMonth, nextMonthStr,
   simulateLoans, plannedLoans, cloneLoans, freeCash, totalSavingsContrib,
-  byCategory, totalForMonth, spendsForMonth, lastMonthsTotals, savMonthsToGoal,
+  byCategory, totalForMonth, spendsForMonth, incomesForMonth, lastMonthsTotals, savMonthsToGoal,
   totalAccounts, totalSaved, avgPrevSpend, applyCurrency, persistLocal,
 } from './state.js';
 import { currentUser, syncState } from './store.js';
@@ -16,6 +16,7 @@ import { appEl, V, toast, alertDialog, getCachedPhoto } from './dom.js';
 import {
   openAddSpend, openEditSpend, openLoanForm, openLoanDetail,
   openSavDetail, openSettings, openAccountForm, openAccountDetail, openAddBalance,
+  openAddIncome, openEditIncome,
   renderOnboarding, renderLogin,
 } from './sheets.js';
 
@@ -282,6 +283,17 @@ function spendRowHTML(sp) {
     <div class="amt">${fmt(sp.amount)}</div>
   </div>`;
 }
+function incomeRowHTML(inc) {
+  const note = esc(inc.note);
+  return `<div class="spend-item" data-income="${esc(inc.id)}">
+    <div class="cat-icon" style="background:#7BE3C022">💰</div>
+    <div class="info">
+      <div class="name">${note || 'Income'}</div>
+      <div class="meta">Income</div>
+    </div>
+    <div class="amt" style="color:var(--emerald)">+${fmt(inc.amount)}</div>
+  </div>`;
+}
 // Re-render on each keystroke, then restore focus/caret (the input is recreated).
 function wireSearch(el) {
   const s = el.querySelector('#sp_all');
@@ -301,35 +313,45 @@ function renderSpending(el) {
   // All-time search results across every month.
   if (q) {
     const matches = S.spends
-      .filter((sp) => ((sp.note || '') + ' ' + catOf(sp.category).label).toLowerCase().includes(q))
+      .filter((sp) => {
+        const label = sp.type === 'income' ? 'income' : catOf(sp.category).label;
+        return ((sp.note || '') + ' ' + label).toLowerCase().includes(q);
+      })
       .sort((a, b) => b.ts - a.ts);
-    const total = matches.reduce((s, sp) => s + sp.amount, 0);
+    const total = matches.filter((sp) => sp.type !== 'income').reduce((s, sp) => s + sp.amount, 0);
     let h = searchBox + `<div class="seclabel"><div class="t">${matches.length} result${matches.length === 1 ? '' : 's'}</div><div class="m">${fmt(total)}</div></div>`;
     if (!matches.length) h += `<div class="empty">No matches across your spending.</div>`;
     const byMonth = {};
     for (const sp of matches) (byMonth[sp.month] = byMonth[sp.month] || []).push(sp);
     for (const m of Object.keys(byMonth).sort().reverse()) {
       h += `<div class="day-group"><div class="day-label">${monthDisplay(m)}</div>`;
-      for (const sp of byMonth[m]) h += spendRowHTML(sp);
+      for (const sp of byMonth[m]) h += sp.type === 'income' ? incomeRowHTML(sp) : spendRowHTML(sp);
       h += `</div>`;
     }
     el.innerHTML = h;
     wireSearch(el);
     el.querySelectorAll('[data-spend]').forEach((item) => (item.onclick = () => openEditSpend(item.dataset.spend)));
+    el.querySelectorAll('[data-income]').forEach((item) => (item.onclick = () => openEditIncome(item.dataset.income)));
     return;
   }
 
   // Normal current/selected-month view.
   const items = spendsForMonth(V.spendMonth);
+  const incomes = incomesForMonth(V.spendMonth);
   const total = items.reduce((s, sp) => s + sp.amount, 0);
+  const incomeTotal = incomes.reduce((s, inc) => s + inc.amount, 0);
   const cats = byCategory(V.spendMonth);
   const isNow = V.spendMonth === nowMonth();
 
   const byDay = {};
-  for (const sp of [...items].sort((a, b) => b.ts - a.ts)) {
-    const d = new Date(sp.ts);
+  const allEntries = [
+    ...items.map((sp) => ({ ...sp, _kind: 'spend' })),
+    ...incomes.map((inc) => ({ ...inc, _kind: 'income' })),
+  ];
+  for (const entry of allEntries.sort((a, b) => b.ts - a.ts)) {
+    const d = new Date(entry.ts);
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    (byDay[key] = byDay[key] || []).push(sp);
+    (byDay[key] = byDay[key] || []).push(entry);
   }
 
   let h = searchBox + `<div class="month-nav">
@@ -338,16 +360,18 @@ function renderSpending(el) {
     <button id="mn_next" ${isNow ? 'style="opacity:.3;pointer-events:none"' : ''}>›</button>
   </div>`;
 
-  if (items.length === 0) {
-    h += `<div class="empty">No spending in ${monthDisplay(V.spendMonth)}.<br>Tap ＋ to add an entry.</div>`;
+  if (items.length === 0 && incomes.length === 0) {
+    h += `<div class="empty">No entries in ${monthDisplay(V.spendMonth)}.<br>Tap ＋ to add spending or income.</div>`;
   } else {
     h += `<div style="background:var(--card);border-radius:14px;padding:13px 16px;margin-bottom:14px;box-shadow:var(--shadow);display:flex;justify-content:space-between;align-items:center">
-      <div><div style="font-size:10px;color:var(--faint);text-transform:uppercase;letter-spacing:.1em">Total spent</div>
+      <div><div style="font-size:10px;color:var(--faint);text-transform:uppercase;letter-spacing:.1em">Spent</div>
         <div style="font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:26px">${fmt(total)}</div></div>
-      ${S.budget > 0 ? `<div style="text-align:right">
-        <div style="font-size:10px;color:var(--faint);text-transform:uppercase;letter-spacing:.1em">Budget</div>
-        <div style="font-family:'Bricolage Grotesque',sans-serif;font-weight:700;font-size:18px;color:${total > S.budget ? 'var(--danger)' : 'var(--emerald)'}">${fmtShort(S.budget)}</div>
-      </div>` : ''}
+      <div style="text-align:right">
+        ${incomeTotal > 0 ? `<div style="font-size:10px;color:var(--faint);text-transform:uppercase;letter-spacing:.1em">Income</div>
+        <div style="font-family:'Bricolage Grotesque',sans-serif;font-weight:700;font-size:18px;color:var(--emerald)">+${fmtShort(incomeTotal)}</div>` : ''}
+        ${S.budget > 0 && !incomeTotal ? `<div style="font-size:10px;color:var(--faint);text-transform:uppercase;letter-spacing:.1em">Budget</div>
+        <div style="font-family:'Bricolage Grotesque',sans-serif;font-weight:700;font-size:18px;color:${total > S.budget ? 'var(--danger)' : 'var(--emerald)'}">${fmtShort(S.budget)}</div>` : ''}
+      </div>
     </div>`;
 
     const sortedCats = allCats().filter((c) => cats[c.id]).sort((a, b) => cats[b.id] - cats[a.id]);
@@ -361,13 +385,13 @@ function renderSpending(el) {
       h += `</div>`;
     }
 
-    for (const dayKey of Object.keys(byDay)) {
+    for (const dayKey of Object.keys(byDay).sort().reverse()) {
       const d = new Date(dayKey + 'T12:00:00');
       const todayKey = new Date().toISOString().slice(0, 10);
       const yesterdayKey = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
       const dayLabel = dayKey === todayKey ? 'Today' : dayKey === yesterdayKey ? 'Yesterday' : d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
       h += `<div class="day-group"><div class="day-label">${dayLabel}</div>`;
-      for (const sp of byDay[dayKey]) h += spendRowHTML(sp);
+      for (const entry of byDay[dayKey]) h += entry._kind === 'income' ? incomeRowHTML(entry) : spendRowHTML(entry);
       h += `</div>`;
     }
   }
@@ -377,6 +401,7 @@ function renderSpending(el) {
   document.getElementById('mn_prev').onclick = () => { V.spendMonth = prevMonth(V.spendMonth); renderContent(); };
   document.getElementById('mn_next').onclick = () => { V.spendMonth = nextMonthStr(V.spendMonth); renderContent(); };
   el.querySelectorAll('[data-spend]').forEach((item) => (item.onclick = () => openEditSpend(item.dataset.spend)));
+  el.querySelectorAll('[data-income]').forEach((item) => (item.onclick = () => openEditIncome(item.dataset.income)));
 }
 
 // ── Loans tab ───────────────────────────────────────────────────────────────

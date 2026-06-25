@@ -172,7 +172,8 @@ export function avgPrevSpend(n = 3) {
 }
 
 // ── Spending helpers ──────────────────────────────────────────────────────────
-export function spendsForMonth(ym) { return S.spends.filter((sp) => sp.month === ym); }
+export function spendsForMonth(ym) { return S.spends.filter((sp) => sp.month === ym && sp.type !== 'income'); }
+export function incomesForMonth(ym) { return S.spends.filter((sp) => sp.month === ym && sp.type === 'income'); }
 export function totalForMonth(ym) { return spendsForMonth(ym).reduce((s, sp) => s + sp.amount, 0); }
 export function byCategory(ym) {
   const totals = {};
