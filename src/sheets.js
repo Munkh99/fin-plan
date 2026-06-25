@@ -115,7 +115,7 @@ export function openAddSpend(prefill) {
   scrim.innerHTML = `<div class="sheet">
     <h2>Add spending</h2>
     <div class="amount-prefix">Amount (${esc(CUR.symbol)})</div>
-    <input class="amount-input" id="sp_amount" inputmode="numeric" placeholder="0" autocomplete="off" value="${prefill ? prefill.amount : ''}">
+    <input class="amount-input" id="sp_amount" inputmode="decimal" placeholder="0" autocomplete="off" value="${prefill ? prefill.amount : ''}">
     <div class="cat-grid" id="cat_grid">${catGrid()}</div>
     <label class="set-label">Note (optional)</label>
     <input class="set-input" id="sp_note" placeholder="e.g. Lunch, Grocery run…" value="${prefill ? esc(prefill.note || '') : ''}">
@@ -138,7 +138,7 @@ export function openAddSpend(prefill) {
     // in-progress entry preserved and the new category selected.
     if (btn.dataset.new) {
       const cur = {
-        amount: (document.getElementById('sp_amount').value || '').replace(/[^\d]/g, ''),
+        amount: (document.getElementById('sp_amount').value || '').replace(/[^\d.]/g, ''),
         note: document.getElementById('sp_note').value,
         date: document.getElementById('sp_date').value,
         account: accountVal('sp_account'),
@@ -150,7 +150,7 @@ export function openAddSpend(prefill) {
     scrim.querySelectorAll('.cat-pick').forEach((b) => b.classList.toggle('selected', b.dataset.cat === selCat));
   }; });
   document.getElementById('sp_save').onclick = async () => {
-    const amount = Math.floor(parseFloat((document.getElementById('sp_amount').value || '').replace(/[^\d.]/g, '')) || 0);
+    const amount = Math.round((parseFloat((document.getElementById('sp_amount').value || '').replace(/[^\d.]/g, '')) || 0) * 100) / 100;
     if (!amount) { toast('Enter an amount.'); return; }
     const note = (document.getElementById('sp_note').value || '').trim();
     const dateStr = document.getElementById('sp_date').value || todayStr();
@@ -183,7 +183,7 @@ export function openEditSpend(id) {
   scrim.innerHTML = `<div class="sheet">
     <h2>Edit spending</h2>
     <div class="amount-prefix">Amount (${esc(CUR.symbol)})</div>
-    <input class="amount-input" id="sp_amount" inputmode="numeric" value="${sp.amount}">
+    <input class="amount-input" id="sp_amount" inputmode="decimal" value="${sp.amount}">
     <div class="cat-grid" id="cat_grid">${catGrid()}</div>
     <label class="set-label">Note (optional)</label>
     <input class="set-input" id="sp_note" value="${esc(sp.note || '')}">
@@ -210,7 +210,7 @@ export function openEditSpend(id) {
     toast('Entry deleted');
   };
   document.getElementById('sp_save').onclick = async () => {
-    const amount = Math.floor(parseFloat((document.getElementById('sp_amount').value || '').replace(/[^\d.]/g, '')) || 0);
+    const amount = Math.round((parseFloat((document.getElementById('sp_amount').value || '').replace(/[^\d.]/g, '')) || 0) * 100) / 100;
     if (!amount) { toast('Enter an amount.'); return; }
     const note = (document.getElementById('sp_note').value || '').trim();
     const dateStr = document.getElementById('sp_date').value || dateStrFromTs(sp.ts);
@@ -755,7 +755,7 @@ export function openAddIncome(prefill) {
   scrim.innerHTML = `<div class="sheet">
     <h2>Add income</h2>
     <div class="amount-prefix">Amount (${esc(CUR.symbol)})</div>
-    <input class="amount-input" id="inc_amount" inputmode="numeric" placeholder="0" autocomplete="off" value="${prefill ? prefill.amount : ''}">
+    <input class="amount-input" id="inc_amount" inputmode="decimal" placeholder="0" autocomplete="off" value="${prefill ? prefill.amount : ''}">
     <label class="set-label">Source (optional)</label>
     <input class="set-input" id="inc_note" placeholder="e.g. Salary, Freelance, Bonus…" value="${prefill ? esc(prefill.note || '') : ''}">
     <label class="set-label">Date</label>
@@ -773,7 +773,7 @@ export function openAddIncome(prefill) {
   wireDateField('inc_date');
   wireAccountField('inc_account');
   document.getElementById('inc_save').onclick = () => {
-    const amount = Math.floor(parseFloat((document.getElementById('inc_amount').value || '').replace(/[^\d.]/g, '')) || 0);
+    const amount = Math.round((parseFloat((document.getElementById('inc_amount').value || '').replace(/[^\d.]/g, '')) || 0) * 100) / 100;
     if (!amount) { toast('Enter an amount.'); return; }
     const note = (document.getElementById('inc_note').value || '').trim();
     const dateStr = document.getElementById('inc_date').value || todayStr();
@@ -793,7 +793,7 @@ export function openEditIncome(id) {
   scrim.innerHTML = `<div class="sheet">
     <h2>Edit income</h2>
     <div class="amount-prefix">Amount (${esc(CUR.symbol)})</div>
-    <input class="amount-input" id="inc_amount" inputmode="numeric" value="${inc.amount}">
+    <input class="amount-input" id="inc_amount" inputmode="decimal" value="${inc.amount}">
     <label class="set-label">Source (optional)</label>
     <input class="set-input" id="inc_note" value="${esc(inc.note || '')}">
     <label class="set-label">Date</label>
@@ -816,7 +816,7 @@ export function openEditIncome(id) {
     toast('Income entry deleted');
   };
   document.getElementById('inc_save').onclick = () => {
-    const amount = Math.floor(parseFloat((document.getElementById('inc_amount').value || '').replace(/[^\d.]/g, '')) || 0);
+    const amount = Math.round((parseFloat((document.getElementById('inc_amount').value || '').replace(/[^\d.]/g, '')) || 0) * 100) / 100;
     if (!amount) { toast('Enter an amount.'); return; }
     const note = (document.getElementById('inc_note').value || '').trim();
     const dateStr = document.getElementById('inc_date').value || dateStrFromTs(inc.ts);

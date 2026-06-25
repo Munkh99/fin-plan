@@ -75,7 +75,11 @@ export function persistLocal() {
 export let CUR = CURRENCIES[0];
 export const applyCurrency = (code) => { CUR = CURRENCIES.find((c) => c.code === code) || CURRENCIES[0]; };
 
-export const fmt = (n) => CUR.symbol + Math.round(n).toLocaleString('en-US');
+export const fmt = (n) => {
+  const v = Math.round(n * 100) / 100;
+  const opts = v % 1 !== 0 ? { minimumFractionDigits: 2, maximumFractionDigits: 2 } : {};
+  return CUR.symbol + v.toLocaleString('en-US', opts);
+};
 export const fmtShort = (n) => {
   n = Math.round(n);
   return n >= 1e6 ? CUR.symbol + (n / 1e6).toFixed(n % 1e6 ? 1 : 0) + 'M'
