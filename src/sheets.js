@@ -103,9 +103,12 @@ function wireDateField(id) {
   };
 }
 
-// ── Add spending sheet ─────────────────────────────────────────────────────────
-export function openAddSpend(prefill) {
+// ── Add transaction sheet (expense + income toggle) ────────────────────────────
+export function openAddSpend(prefill, mode) {
+  mode = mode || 'expense';
+  const isIncome = mode === 'income';
   let selCat = (prefill && prefill.category) || V.lastCat;
+
   const catGrid = () => allCats().map((c) => `
     <div class="cat-pick${selCat === c.id ? ' selected' : ''}" data-cat="${esc(c.id)}">
       <span class="icon">${esc(c.icon)}</span>
@@ -113,19 +116,22 @@ export function openAddSpend(prefill) {
     </div>`).join('') + `<div class="cat-pick cat-new" data-new="1"><span class="icon">＋</span><span class="label">New</span></div>`;
 
   scrim.innerHTML = `<div class="sheet">
-    <h2>Add spending</h2>
+    <div class="theme-seg" style="margin-bottom:18px">
+      <button id="tog_expense"${!isIncome ? ' class="on"' : ''}>Expense</button>
+      <button id="tog_income"${isIncome ? ' class="on"' : ''}>Income</button>
+    </div>
     <div class="amount-prefix">Amount (${esc(CUR.symbol)})</div>
-    <input class="amount-input" id="sp_amount" inputmode="decimal" placeholder="0" autocomplete="off" value="${prefill ? prefill.amount : ''}">
-    <div class="cat-grid" id="cat_grid">${catGrid()}</div>
-    <label class="set-label">Note (optional)</label>
-    <input class="set-input" id="sp_note" placeholder="e.g. Lunch, Grocery run…" value="${prefill ? esc(prefill.note || '') : ''}">
+    <input class="amount-input" id="sp_amount" inputmode="decimal" placeholder="0" autocomplete="off" value="${prefill ? (prefill.amount || '') : ''}">
+    ${isIncome ? '' : `<div class="cat-grid" id="cat_grid">${catGrid()}</div>`}
+    <label class="set-label">${isIncome ? 'Source (optional)' : 'Note (optional)'}</label>
+    <input class="set-input" id="sp_note" placeholder="${isIncome ? 'e.g. Salary, Freelance, Bonus…' : 'e.g. Lunch, Grocery run…'}" value="${prefill ? esc(prefill.note || '') : ''}">
     <label class="set-label">Date</label>
     <input type="hidden" id="sp_date" value="${prefill && prefill.date ? esc(prefill.date) : todayStr()}">
     <button class="set-input" id="sp_date_btn" type="button" style="text-align:left;cursor:pointer">${dateBtnLabel(prefill && prefill.date ? prefill.date : todayStr())}</button>
-    ${accountSelectHTML('sp_account', prefill && prefill.account)}
+    ${accountSelectHTML('sp_account', prefill && prefill.account, isIncome ? 'To account (optional)' : 'From account')}
     <div class="btnrow">
       <button class="ghost" id="sp_cancel">Cancel</button>
-      <button class="primary" id="sp_save">Add</button>
+      <button class="primary" id="sp_save">${isIncome ? 'Add income' : 'Add expense'}</button>
     </div>
   </div>`;
   scrim.classList.add('open');
@@ -133,22 +139,28 @@ export function openAddSpend(prefill) {
   document.getElementById('sp_cancel').onclick = closeSheet;
   wireDateField('sp_date');
   wireAccountField('sp_account');
-  scrim.querySelectorAll('.cat-pick').forEach((btn) => { btn.onclick = () => {
-    // "+ New" tile: create a category inline, then reopen this sheet with the
-    // in-progress entry preserved and the new category selected.
-    if (btn.dataset.new) {
-      const cur = {
-        amount: (document.getElementById('sp_amount').value || '').replace(/[^\d.]/g, ''),
-        note: document.getElementById('sp_note').value,
-        date: document.getElementById('sp_date').value,
-        account: accountVal('sp_account'),
-      };
-      openNewCategory((id) => openAddSpend({ ...cur, category: id || selCat }));
-      return;
-    }
-    selCat = btn.dataset.cat;
-    scrim.querySelectorAll('.cat-pick').forEach((b) => b.classList.toggle('selected', b.dataset.cat === selCat));
-  }; });
+
+  const getState = () => ({
+    amount: (document.getElementById('sp_amount').value || '').replace(/[^\d.]/g, ''),
+    note: document.getElementById('sp_note').value,
+    date: document.getElementById('sp_date').value,
+    account: accountVal('sp_account'),
+    category: selCat,
+  });
+  document.getElementById('tog_expense').onclick = () => { if (isIncome) openAddSpend({ ...getState() }, 'expense'); };
+  document.getElementById('tog_income').onclick = () => { if (!isIncome) openAddSpend({ ...getState() }, 'income'); };
+
+  if (!isIncome) {
+    scrim.querySelectorAll('.cat-pick').forEach((btn) => { btn.onclick = () => {
+      if (btn.dataset.new) {
+        openNewCategory((id) => openAddSpend({ ...getState(), category: id || selCat }, 'expense'));
+        return;
+      }
+      selCat = btn.dataset.cat;
+      scrim.querySelectorAll('.cat-pick').forEach((b) => b.classList.toggle('selected', b.dataset.cat === selCat));
+    }; });
+  }
+
   document.getElementById('sp_save').onclick = async () => {
     const amount = Math.round((parseFloat((document.getElementById('sp_amount').value || '').replace(/[^\d.]/g, '')) || 0) * 100) / 100;
     if (!amount) { toast('Enter an amount.'); return; }
@@ -157,17 +169,24 @@ export function openAddSpend(prefill) {
     const ts = dateStr === todayStr() ? Date.now() : new Date(dateStr + 'T12:00:00').getTime();
     const ym = dateStr.slice(0, 7);
     const account = accountVal('sp_account');
-    // Warn (don't block) if it would overdraw the chosen account.
-    if (account) {
-      const a = S.accounts[account];
-      if (a && amount > a.balance && !(await confirmDialog(`${fmt(amount)} is more than "${a.name}" holds (${fmt(a.balance)}). Add it anyway? The account will go negative.`, { okText: 'Add anyway', danger: true }))) return;
+    if (isIncome) {
+      const id = 'inc_' + Date.now();
+      S.spends.push({ id, ts, month: ym, amount, note, account: account || undefined, type: 'income' });
+      if (account) { adjustAccount(account, +amount); persistAcc(account); }
+      persistSpend(id); closeSheet(); renderContent();
+      toast(`Income ${fmt(amount)} added`);
+    } else {
+      if (account) {
+        const a = S.accounts[account];
+        if (a && amount > a.balance && !(await confirmDialog(`${fmt(amount)} is more than "${a.name}" holds (${fmt(a.balance)}). Add it anyway? The account will go negative.`, { okText: 'Add anyway', danger: true }))) return;
+      }
+      const id = 'sp_' + Date.now();
+      V.lastCat = selCat;
+      S.spends.push({ id, ts, month: ym, amount, category: selCat, note, account: account || undefined });
+      if (account) { adjustAccount(account, -amount); persistAcc(account); }
+      persistSpend(id); closeSheet(); renderContent();
+      toast(`Added ${fmt(amount)} · ${catOf(selCat).label}`);
     }
-    const id = 'sp_' + Date.now();
-    V.lastCat = selCat;
-    S.spends.push({ id, ts, month: ym, amount, category: selCat, note, account: account || undefined });
-    if (account) { adjustAccount(account, -amount); persistAcc(account); }
-    persistSpend(id); closeSheet(); renderContent();
-    toast(`Added ${fmt(amount)} · ${catOf(selCat).label}`);
   };
 }
 
@@ -635,9 +654,7 @@ function openNewCategory(onDone) {
 export function openAddBalance() {
   scrim.innerHTML = `<div class="sheet">
     <h2>Add</h2>
-    <div class="hint">What would you like to add?</div>
-    <button class="ghost ab-opt" id="ab_income">💰 Income
-      <span>Salary, freelance or any money received</span></button>
+    <div class="hint">What would you like to add to Accounts?</div>
     <button class="ghost ab-opt" id="ab_acct">🏦 Account
       <span>Bank, cash or e-wallet balance</span></button>
     <button class="ghost ab-opt" id="ab_goal">🎯 Saving
@@ -646,7 +663,6 @@ export function openAddBalance() {
   </div>`;
   scrim.classList.add('open');
   document.getElementById('ab_cancel').onclick = closeSheet;
-  document.getElementById('ab_income').onclick = () => openAddIncome();
   document.getElementById('ab_acct').onclick = () => openAccountForm(null, renderContent);
   document.getElementById('ab_goal').onclick = () => openSavingsForm(null, renderContent);
 }
@@ -686,19 +702,18 @@ export function openAccountDetail(id) {
   </div>`).join('');
 
   scrim.innerHTML = `<div class="sheet">
-    <h2><span class="dot" style="background:${ac(id)};width:12px;height:12px;border-radius:50%"></span>${esc(a.name)}</h2>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <h2 style="margin:0"><span class="dot" style="background:${ac(id)};width:12px;height:12px;border-radius:50%"></span>${esc(a.name)}</h2>
+      <button class="ghost" id="acd_edit" style="font-size:13px;padding:6px 12px;border-radius:10px;box-shadow:none">Edit</button>
+    </div>
     <div class="hint">${esc(acctIcon(a.type))} ${esc(typeLabel)} · balance ${fmt(a.balance)}</div>
     <div class="row-space" style="margin-bottom:10px;font-size:12px;color:var(--soft)">
       <span>${items.length} transaction${items.length === 1 ? '' : 's'}</span>
       <span>−${fmt(out)}${totalIn > 0 ? ` / <b style="color:var(--emerald)">+${fmt(totalIn)}</b>` : ''}</span>
     </div>
-    ${rows || '<div class="empty" style="padding:14px 0">Nothing drawn from this account yet.<br>Pick it as the source when adding a spend, loan payment or saving.</div>'}
-    <div class="btnrow">
-      <button class="ghost" id="acd_edit">Edit</button>
-      <button class="primary" id="acd_close">Close</button>
-    </div></div>`;
+    ${rows || '<div class="empty" style="padding:14px 0">No transactions yet.<br>Pick this account when adding a spend, loan payment or saving.</div>'}
+  </div>`;
   scrim.classList.add('open');
-  document.getElementById('acd_close').onclick = closeSheet;
   document.getElementById('acd_edit').onclick = () => openAccountForm(id, () => openAccountDetail(id));
 }
 
@@ -752,40 +767,7 @@ export function openAccountForm(editId, onDone) {
 
 // ── Add / edit income ─────────────────────────────────────────────────────────
 export function openAddIncome(prefill) {
-  scrim.innerHTML = `<div class="sheet">
-    <h2>Add income</h2>
-    <div class="amount-prefix">Amount (${esc(CUR.symbol)})</div>
-    <input class="amount-input" id="inc_amount" inputmode="decimal" placeholder="0" autocomplete="off" value="${prefill ? prefill.amount : ''}">
-    <label class="set-label">Source (optional)</label>
-    <input class="set-input" id="inc_note" placeholder="e.g. Salary, Freelance, Bonus…" value="${prefill ? esc(prefill.note || '') : ''}">
-    <label class="set-label">Date</label>
-    <input type="hidden" id="inc_date" value="${prefill && prefill.date ? esc(prefill.date) : todayStr()}">
-    <button class="set-input" id="inc_date_btn" type="button" style="text-align:left;cursor:pointer">${dateBtnLabel(prefill && prefill.date ? prefill.date : todayStr())}</button>
-    ${accountSelectHTML('inc_account', prefill && prefill.account, 'To account (optional)')}
-    <div class="btnrow">
-      <button class="ghost" id="inc_cancel">Cancel</button>
-      <button class="primary" id="inc_save">Add</button>
-    </div>
-  </div>`;
-  scrim.classList.add('open');
-  document.getElementById('inc_amount').focus();
-  document.getElementById('inc_cancel').onclick = closeSheet;
-  wireDateField('inc_date');
-  wireAccountField('inc_account');
-  document.getElementById('inc_save').onclick = () => {
-    const amount = Math.round((parseFloat((document.getElementById('inc_amount').value || '').replace(/[^\d.]/g, '')) || 0) * 100) / 100;
-    if (!amount) { toast('Enter an amount.'); return; }
-    const note = (document.getElementById('inc_note').value || '').trim();
-    const dateStr = document.getElementById('inc_date').value || todayStr();
-    const ts = dateStr === todayStr() ? Date.now() : new Date(dateStr + 'T12:00:00').getTime();
-    const ym = dateStr.slice(0, 7);
-    const account = accountVal('inc_account');
-    const id = 'inc_' + Date.now();
-    S.spends.push({ id, ts, month: ym, amount, note, account: account || undefined, type: 'income' });
-    if (account) { adjustAccount(account, +amount); persistAcc(account); }
-    persistSpend(id); closeSheet(); renderContent();
-    toast(`Income ${fmt(amount)} added`);
-  };
+  openAddSpend(prefill, 'income');
 }
 
 export function openEditIncome(id) {
